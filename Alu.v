@@ -47,7 +47,7 @@ Section Exceptions.
   Definition ExViolation := 17.
   Definition LdViolation := 18.
   Definition SdViolation := 19.
-  (* Note: Definition McLdViolation := 20. Clear loaded tag when Mc is absent *)
+  (* Note: Absent Definition McLdViolation := 20. Clear loaded tag when Mc is absent *)
   Definition McSdViolation := 21.
   Definition SrViolation := 24.
   Definition IllegalException := 2.
@@ -396,7 +396,6 @@ Section Cap.
           "exact" :: Bool }.
 
     (* TODO check when length = 2^32-1 and base = 2^32-1 *)
-
     Definition calculateBounds : LetExpr ty Bounds :=
       ( LetE lenTrunc : Bit (AddrSz + 1 - CapBSz) <- TruncMsb (AddrSz + 1 - CapBSz) CapBSz length;
         LetE eInit: Bit ExpSz <- Add [$(AddrSz + 1 - CapBSz); Inv (countLeadingZeros _ #lenTrunc)];
@@ -1268,7 +1267,6 @@ Section Decode.
       RetE #res).
 End Decode.
 
-(* TODO: Assembler, Spec, MemBanks, Clut, Pipelines (Load, LoadCap, Store, Fetch) *)
 Section Alu.
   Variable ty: Kind -> Type.
 
@@ -1832,7 +1830,7 @@ Section Alu.
 
       LetE newWaits : Array NumRegs Bool <-
                         waits @[ #rdIdx <- And [MultiCycle; isNotZero #rdIdx; Not #isException] ];
-      
+
       @RetE _ AluOut (STRUCT { "regs" ::= #newRegs ;
                                "waits" ::= #newWaits ;
                                "csrs" ::= #newCsrs ;
@@ -1856,3 +1854,4 @@ Section Alu.
                                "FenceI" ::= And [FenceI; Not #isException] })).
 End Alu.
 
+(* TODO: Complete Spec, tools to convert assembly to Guru, MemBanks, Clut, Pipelines (Load, LoadCap, Store, Fetch) *)
