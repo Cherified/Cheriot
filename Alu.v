@@ -1632,7 +1632,7 @@ Section Alu.
                           (Or [ITE0 CGetBase #cap1Base; ITE0 CGetTop #cap1Top; ITE0 CGetLen #adderResFull;
                                ITE0 Crrl (##newBounds`"length") ]);
 
-      LetE linkAddr <- Add [pcVal; if HasComp then $(InstSz/8) else ITE Compressed $(InstSz/8) $(CompInstSz/8)];
+      LetE linkAddr <- Add [pcVal; if HasComp then ITE Compressed $(InstSz/8) $(CompInstSz/8) else $(InstSz/8)];
 
       LetE resVal <- Or [ ITE0 AddOp #adderRes; ITE0 Lui #fullImmXlen;
                           ITE0 XorOp #xorRes; ITE0 OrOp #orRes; ITE0 AndOp #andRes;
