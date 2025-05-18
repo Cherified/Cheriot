@@ -592,16 +592,12 @@ Definition DecodeOut :=
 Definition AluIn :=
   STRUCT_TYPE {
              "pcAluOut" :: PcAluOut ;
-                 "inst" :: Inst ;
             "decodeOut" :: DecodeOut ;
-                 "reg1" :: FullECapWithTag ;
-                 "reg2" :: FullECapWithTag ;
                  "regs" :: Array NumRegs FullECapWithTag ;
                 "waits" :: Array NumRegs Bool ;
                  "csrs" :: Csrs ;
                  "scrs" :: Scrs ;
-           "interrupts" :: Interrupts ;
-             "incoming" :: Interrupts }.
+           "interrupts" :: Interrupts }.
 
 Definition AluOut := STRUCT_TYPE { "regs" :: Array NumRegs FullECapWithTag ;
                                    "waits" :: Array NumRegs Bool ;
@@ -1304,9 +1300,6 @@ Section Alu.
   Local Definition   interrupts: Expr ty Interrupts := aluIn`"interrupts".
   Local Definition                mei: Expr ty Bool := interrupts`"mei".
   Local Definition                mti: Expr ty Bool := interrupts`"mti".
-  Local Definition     incoming: Expr ty Interrupts := aluIn`"incoming".
-  Local Definition                mep: Expr ty Bool := incoming`"mei".
-  Local Definition                mtp: Expr ty Bool := incoming`"mti".
 
   Local Definition           rs1IdxFixed: Expr ty _ := aluIn`"decodeOut"`"rs1Idx" : Expr ty (Bit RegFixedIdSz).
   Local Definition           rs2IdxFixed: Expr ty _ := aluIn`"decodeOut"`"rs2Idx" : Expr ty (Bit RegFixedIdSz).
@@ -1731,8 +1724,8 @@ Section Alu.
                                               And [Not (isInterruptDisabling #cap1OType); ie]])]
                              ie;
 
-      LetE newInterrupts : Interrupts <- STRUCT { "mei" ::= Or [mep; And [Not ie; mei]] ;
-                                                  "mti" ::= Or [mtp; And [Or [Not ie; mei]; mti]] };
+      LetE newInterrupts : Interrupts <- STRUCT { "mei" ::= And [Not ie; mei] ;
+                                                  "mti" ::= And [Or [Not ie; mei]; mti] };
 
       LetE newInterrupt : Bool <- And [ie; Or [mei; mti]];
 
