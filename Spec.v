@@ -158,7 +158,7 @@ Section Spec.
 
   Theorem specInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
-      SemAnyAction [step type; asyncInterrupts type] old new puts gets ->
+      SemAction (step type) old new puts gets WO ->
       SpecInvariant new.
   Admitted.
 End Spec.
