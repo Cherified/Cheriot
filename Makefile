@@ -5,7 +5,7 @@ VS:=$(shell find . -type f -name '*.v')
 .DEFAULT_GOAL = coq
 
 coq: Makefile.coq.all $(VS)
-	$(MAKE) -C ../Guru
+	$(MAKE) -j -C ../Guru
 	$(MAKE) -f Makefile.coq.all
 
 Makefile.coq.all: force
