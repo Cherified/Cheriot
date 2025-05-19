@@ -143,7 +143,7 @@ Section Spec.
         RegWrite "specInterrupts" in specLists <- ##aluOut`"interrupts";
         Return ConstDef ).
 
-    Definition asyncInterrupts: Action ty (getModLists specDecl) (Bit 0) :=
+    Definition async: Action ty (getModLists specDecl) (Bit 0) :=
       ( Get interrupts <- "interrupts" in specLists;
         RegRead specInterrupts <- "specInterrupts" in specLists;
         RegWrite "specInterrupts" in specLists <- Or [#interrupts; #specInterrupts];
@@ -151,14 +151,26 @@ Section Spec.
   End Ty.
 
   Definition spec: Mod := {|modDecl := specDecl;
-                            modActions := fun ty => [step ty; asyncInterrupts ty]|}.
+                            modActions := fun ty => [step ty; async ty]|}.
 
-  Definition SpecInvariant: ModStateModDecl specDecl -> Prop.
+  Definition RegsInvariant: FuncState (mregs specLists) -> Prop.
   Admitted.
+
+  Definition SpecInvariant (s: ModStateModDecl specDecl) : Prop :=
+    RegsInvariant (stateRegs s) /\
+      (forall i, stateMems s i = match i with end) /\
+      (forall i, stateRegUs s i = match i with end) /\
+      (forall i, stateMemUs s i = match i with end).
 
   Theorem specInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
       SemAction (step type) old new puts gets WO ->
+      SpecInvariant new.
+  Admitted.
+
+  Theorem asyncInvariantPreserved: forall old new puts gets,
+      SpecInvariant old ->
+      SemAction (async type) old new puts gets WO ->
       SpecInvariant new.
   Admitted.
 End Spec.
