@@ -1,5 +1,3 @@
-VS:=$(shell find . -type f -name '*.v') Switcher.v
-
 .PHONY: coq clean force haskell
 
 .DEFAULT_GOAL = coq
@@ -21,12 +19,12 @@ Switcher.v:
 	rm tmp
 	echo "nil)." >> Switcher.v
 
-coq: Makefile.coq.all $(VS)
+coq: Makefile.coq.all Switcher.v
 	$(MAKE) -j -C ../Guru
 	$(MAKE) -f Makefile.coq.all
 
-Makefile.coq.all: force Switcher.v
-	$(COQBIN)rocq makefile -f _CoqProject $(VS) -o Makefile.coq.all
+Makefile.coq.all: force
+	$(COQBIN)rocq makefile -f _CoqProject -o Makefile.coq.all
 
 force:
 
@@ -43,5 +41,5 @@ clean:: Makefile.coq.all
 	find . -type f -name '*.aux' -exec rm {} \;
 	rm -f Makefile.coq.all Makefile.coq.all.conf .Makefile.coq.all.d
 	rm -f .nia.cache .lia.cache
-	rm Switcher.v
+	rm -f Switcher.v
 
