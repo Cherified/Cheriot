@@ -1,4 +1,4 @@
-Require Import List BinInt.
+From Stdlib Require Import List BinInt.
 Import ListNotations.
 
 Local Open Scope Z_scope.

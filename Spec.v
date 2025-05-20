@@ -1,4 +1,4 @@
-Require Import String List.
+From Stdlib Require Import String List.
 Require Import Guru.Lib.Library Guru.Lib.Word.
 Require Import Guru.Syntax Guru.Notations Guru.Semantics.
 Require Import Cheriot.Alu Cheriot.Switcher.

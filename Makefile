@@ -1,4 +1,4 @@
-VS:=$(shell find . -type f -name '*.v')
+VS:=$(shell find . -type f -name '*.v') Switcher.v
 
 .PHONY: coq clean force haskell
 
@@ -8,7 +8,7 @@ CHERIOT_ROOT = $(HOME)/CHERIOT
 CURR_DIR = $(shell pwd)
 
 Switcher.v:
-	echo "Require Import List BinInt." > Switcher.v
+	echo "From Stdlib Require Import List BinInt." > Switcher.v
 	echo "Import ListNotations." >> Switcher.v
 	echo "" >> Switcher.v
 	echo "Local Open Scope Z_scope." >> Switcher.v
@@ -21,12 +21,12 @@ Switcher.v:
 	rm tmp
 	echo "nil)." >> Switcher.v
 
-coq: Makefile.coq.all $(VS) Switcher.v
+coq: Makefile.coq.all $(VS)
 	$(MAKE) -j -C ../Guru
 	$(MAKE) -f Makefile.coq.all
 
-Makefile.coq.all: force
-	$(COQBIN)coq_makefile -f _CoqProject $(VS) -o Makefile.coq.all
+Makefile.coq.all: force Switcher.v
+	$(COQBIN)rocq makefile -f _CoqProject $(VS) -o Makefile.coq.all
 
 force:
 
@@ -43,4 +43,5 @@ clean:: Makefile.coq.all
 	find . -type f -name '*.aux' -exec rm {} \;
 	rm -f Makefile.coq.all Makefile.coq.all.conf .Makefile.coq.all.d
 	rm -f .nia.cache .lia.cache
+	rm Switcher.v
 

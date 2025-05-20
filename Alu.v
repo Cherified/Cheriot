@@ -1,4 +1,4 @@
-Require Import String List PeanoNat.
+From Stdlib Require Import String List PeanoNat.
 Require Import Guru.Lib.Word Guru.Lib.Library.
 Require Import Guru.Syntax Guru.Notations.
 
