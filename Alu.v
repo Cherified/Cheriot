@@ -1847,4 +1847,4 @@ Section Alu.
                                "FenceI" ::= And [FenceI; Not #isException] })).
 End Alu.
 
-(* TODO: Complete Spec, tools to convert assembly to Guru, MemBanks, Clut, Pipelines (Load, LoadCap, Store, Fetch) *)
+(* TODO: Clut, MemBanks, Pipelines (Load, LoadCap, Store, Fetch) *)
