@@ -93,7 +93,7 @@ Section Clut.
       Let freeIndex: ClutIdx <- TruncLsb 1 LgClutSz #optFreeIndex;
       Let freeIndexValid: Bool <- Not (FromBit Bool (TruncMsb 1 LgClutSz #optFreeIndex));
 
-      Let rmIndex : ClutIdx <-  TruncLsb (size ClutEntry - LgClutSz) LgClutSz (ToBit (#optCommand`"data"`"clutEntry"));
+      Let rmIndex: ClutIdx <- TruncLsb (size ClutEntry - LgClutSz) LgClutSz (ToBit (#optCommand`"data"`"clutEntry"));
 
       LetIf dummy <- If (And [#optCommand`"valid"; Not (#optResp`"valid")]) Then (
           LetIf dummy <- If (#optCommand`"data"`"isInsert") Then (
@@ -148,12 +148,11 @@ Section Clut.
         Let bounds: Bool <- And [Sle (#entry`"base") #phyAddr; Sle (Add [#phyAddr; (#dmaReq`"size")]) (#entry`"top")];
         Let perms: Bool <- ITE (#dmaReq`"isWrite") (#entry`"WritePerm") (##entry`"ReadPerm");
 
-        (* If it's a read transaction, then it must not be busy *)
-        Let notBusyForRead <- Or [#dmaReq`"isWrite"; Not #busys@[#clutIdx]];
-        Let validAccess <- And [#valid; #bounds; #perms; #notBusyForRead];
+        Let validAccess <- And [#valid; #bounds; #perms];
         LetIf dummy <- If #validAccess Then (
+            (* If it's a read transaction, then it must not be already busy *)
             Send (modLists := cl) channelIdS (match Bool_channelIdS in _ = Y return Expr ty Y with
-                                              | eq_refl => ConstBool true
+                                              | eq_refl => Or [#dmaReq`"isWrite"; Not #busys@[#clutIdx]]
                                               end) (
                 (* If it's a read transaction, mark as busy *)
                 LetIf dummy <- If (Not (#dmaReq`"isWrite")) Then (
