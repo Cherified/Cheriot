@@ -70,7 +70,8 @@ Section Clut.
                             (* All the entries *)
                             ("entries", Array ClutSz ClutEntry)];
                           modMemUs := [];
-                          modSends := (* Response to DMA if it can access *)
+                          modSends := (* Response to DMA if it can access the request received
+                                         for DMA check access *)
                             repeat ("dmaCanAccess", Bool) NumChannels;
                           modRecvs := [
                             (* Return from a read memory transaction to clear busy bit *)
@@ -128,6 +129,7 @@ Section Clut.
     Qed.
 
     (* DMA checks if it can access a particular pseudo-address *)
+    (* On read checks, it outputs true only if the there's no pending read transaction for the same entry *)
     Definition dmaCheckAccess: Action ty cl (Bit 0) :=
       ( Get dmaReqs <- "dmaCheckAccess" in cl;
         Let dmaReq : DmaReq <- ReadArrayConst #dmaReqs channelIdA;
@@ -146,7 +148,9 @@ Section Clut.
         Let bounds: Bool <- And [Sle (#entry`"base") #phyAddr; Sle (Add [#phyAddr; (#dmaReq`"size")]) (#entry`"top")];
         Let perms: Bool <- ITE (#dmaReq`"isWrite") (#entry`"WritePerm") (##entry`"ReadPerm");
 
-        Let validAccess <- And [#valid; #bounds; #perms];
+        (* If it's a read transaction, then it must not be busy *)
+        Let notBusyForRead <- Or [#dmaReq`"isWrite"; Not #busys@[#clutIdx]];
+        Let validAccess <- And [#valid; #bounds; #perms; #notBusyForRead];
         LetIf dummy <- If #validAccess Then (
             Send (modLists := cl) channelIdS (match Bool_channelIdS in _ = Y return Expr ty Y with
                                               | eq_refl => ConstBool true
