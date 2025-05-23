@@ -1384,8 +1384,8 @@ Section Alu.
     ITE (FromBit Bool (TruncMsb 1 n e)) (ConstBit (wones n)) (TruncLsb 1 n e).
 
   Local Definition exception (x: Expr ty (Bit CapExceptSz)) : Expr ty (Option (Bit CapExceptSz)) :=
-    STRUCT { "valid" ::= ConstTBool true;
-             "data" ::= x }.
+    STRUCT { "data" ::= x ;
+             "valid" ::= ConstTBool true }.
 
   Local Definition regIdxWrong (idx: Expr ty (Bit RegFixedIdSz)) :=
     isNotZero (TruncMsb (RegFixedIdSz - RegIdSz) RegIdSz idx).

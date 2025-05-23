@@ -1,8 +1,8 @@
 .PHONY: coq clean force haskell
 
-.DEFAULT_GOAL = coq
+.DEFAULT_GOAL = haskell
 
-CHERIOT_ROOT = $(HOME)/CHERIOT
+CHERIOT_ROOT = $(HOME)/cheriot
 CURR_DIR = $(shell pwd)
 
 Switcher.v:
@@ -25,6 +25,9 @@ coq: Makefile.coq.all Switcher.v
 
 Makefile.coq.all: force
 	$(COQBIN)rocq makefile -f _CoqProject -o Makefile.coq.all
+
+haskell: coq
+	$(MAKE) -C $(CURR_DIR)/../Guru/PrettyPrinter
 
 force:
 
