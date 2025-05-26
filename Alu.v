@@ -1847,4 +1847,4 @@ Section Alu.
                                "FenceI" ::= And [FenceI; Not #isException] })).
 End Alu.
 
-(* TODO: Clut, MemBanks, Pipelines (Load, LoadCap, Store, Fetch) *)
+(* TODO: Pipelines (Load, LoadCap, Store, Fetch), Split binary into membanks *)
