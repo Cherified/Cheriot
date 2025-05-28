@@ -331,7 +331,7 @@ Section Cap.
     Definition get_cM_from_M (M: Expr ty (Bit CapMSz)) := TruncLsb 1 CapcMSz M.
     Definition get_cE_from_E_M (E: Expr ty (Bit ExpSz)) (M: Expr ty (Bit CapMSz)) :=
       ITE (And [isZero E; FromBit Bool (get_Mmsb_from_M M)]) (ConstBit (wones ExpSz)) E.
-    Definition Emax := (Nat.pow 2 ExpSz - CapcMSz).
+    Definition Emax := Eval compute in (Nat.pow 2 ExpSz - CapcMSz).
     Definition get_ECorrected_from_E (E: Expr ty (Bit ExpSz)) : Expr ty (Bit ExpSz) :=
       (ITE (Sge E $Emax) $Emax E).
     Definition get_E_from_ECorrected (ECorrected: Expr ty (Bit ExpSz)): Expr ty (Bit ExpSz) := ECorrected.
