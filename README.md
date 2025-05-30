@@ -1,5 +1,5 @@
 # Cheriot
-CHERIoT implementation in Guru
+CHERIoT implementation in [Guru](https://github.com/Cherified/Guru).
 
 The Makefile expects [CHERIoT RTOS](https://github.com/CHERIoT-Platform/cheriot-rtos) installed in ${CHERIOT_ROOT}/cheriot-rtos and [CHERIoT LLVM](https://github.com/CHERIoT-Platform/llvm-project) in ${CHERIOT_ROOT}/cheriot-llvm.
 Use this [link](https://github.com/CHERIoT-Platform/cheriot-rtos/blob/main/docs/GettingStarted.md#building-cheriot-llvm) to build LLVM.
