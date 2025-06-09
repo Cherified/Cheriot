@@ -1,6 +1,5 @@
-From Stdlib Require Import String List PeanoNat.
-Require Import Guru.Lib.Word Guru.Lib.Library.
-Require Import Guru.Syntax Guru.Notations.
+From Stdlib Require Import String List Zmod ZArith.
+Require Import Guru.Library Guru.Syntax Guru.Notations.
 
 Import ListNotations.
 
@@ -8,11 +7,12 @@ Set Implicit Arguments.
 Unset Strict Implicit.
 Set Asymmetric Patterns.
 
+Local Open Scope Z_scope.
 Definition Xlen := 32.
 Definition Data := Eval compute in Bit Xlen.
 Definition AddrSz := Eval compute in Xlen.
 Definition Addr := Eval compute in Bit AddrSz.
-Definition LgAddrSz := Eval compute in Nat.log2_up AddrSz.
+Definition LgAddrSz := Eval compute in Z.log2_up AddrSz.
 Definition ExpSz := Eval compute in LgAddrSz.
 Definition CapExceptSz := 5.
 
@@ -21,18 +21,18 @@ Definition Inst := Bit 32.
 Definition CompInstSz := 16.
 Definition CompInst := Bit 16.
 Definition HasComp := true.
-Definition NumLsb0BitsInstAddr := Eval compute in (Nat.log2_up ((if HasComp then CompInstSz else InstSz)/8)).
+Definition NumLsb0BitsInstAddr := Eval compute in (Z.log2_up ((if HasComp then CompInstSz else InstSz)/8)).
 
 Definition RegIdSz := 4.
-Definition NumRegs := Eval compute in (Nat.pow 2 RegIdSz).
+Definition NumRegs := Eval compute in (Z.to_nat (Z.shiftl 1 RegIdSz)).
 Definition RegFixedIdSz := 5.
-Definition NumRegsFixed := Eval compute in (Nat.pow 2 RegFixedIdSz).
+Definition NumRegsFixed := Eval compute in (Z.to_nat (Z.shiftl 1 RegFixedIdSz)).
 
 Definition Imm12Sz := 12.
 Definition Imm20Sz := 20.
-Definition DecImmSz := Eval compute in (S Imm20Sz).
+Definition DecImmSz := Eval compute in (Imm20Sz + 1).
 
-Definition CapPermSz := 6.
+Definition CapPermSz := 6%nat.
 Definition CapOTypeSz := 3.
 Definition CapcMSz := 8.
 Definition CapBSz := Eval compute in CapcMSz + 1.
@@ -67,22 +67,22 @@ End Interrupts.
 
 Section Csr.
   (* TODO CSRs performance counters *)
-  Definition Mcycle := hex "B00".
-  Definition Mtime := hex "B01".
-  Definition Minstret := hex "B02".
-  Definition Mcycleh := hex "B80".
-  Definition Mtimeh := hex "B81".
-  Definition Minstreth := hex "B82".
-  Definition Mshwm := hex "BC1".
-  Definition Mshwmb := hex "BC2".
+  Definition Mcycle := 0xB00.
+  Definition Mtime := 0xB01.
+  Definition Minstret := 0xB02.
+  Definition Mcycleh := 0xB80.
+  Definition Mtimeh := 0xB81.
+  Definition Minstreth := 0xB82.
+  Definition Mshwm := 0xBC1.
+  Definition Mshwmb := 0xBC2.
 
-  Definition Mstatus := hex "300".
-  Definition Mcause := hex "342".
-  Definition Mtval := hex "343".
+  Definition Mstatus := 0x300.
+  Definition Mcause := 0x342.
+  Definition Mtval := 0x343.
 
   Definition MshwmAlign := 4.
-  Definition CsrIdSz := Imm12Sz.
-  Definition CsrId := Bit CsrIdSz.
+  Definition CsrIdSz := Eval compute in Imm12Sz.
+  Definition CsrId := Eval compute in (Bit CsrIdSz).
 End Csr.
 
 Section Scr.
@@ -127,10 +127,10 @@ Definition FullECapWithTag := STRUCT_TYPE { "tag" :: Bool;
                                             "addr" :: Addr }.
 
 Definition DXlen := Eval compute in Xlen + Xlen.
-Definition MemSzSz := Eval compute in Nat.log2_up (Nat.log2_up (DXlen/8)).
+Definition MemSzSz := Eval compute in Z.log2_up (Z.log2_up (DXlen/8)).
 Definition FullCapSz := Eval compute in Xlen + size Cap.
 Definition NumBytesFullCapSz := Eval compute in (FullCapSz/8).
-Definition LgNumBytesFullCapSz := Eval compute in lgCeil NumBytesFullCapSz.
+Definition LgNumBytesFullCapSz := Eval compute in Z.log2_up NumBytesFullCapSz.
 
 Section Fields.
   Context {ty: Kind -> Type}.
@@ -150,7 +150,10 @@ Section Fields.
   Definition rdFixedField := (7, RegFixedIdSz).
   Definition auiLuiField := (12, Imm20Sz).
 
-  Notation extractFieldFromInst span := (ConstExtract (InstSz - (snd span) - (fst span)) (snd span) (fst span) inst).
+  Notation extractFieldFromInst span :=
+    ltac:(doSimpl
+            ((ConstExtract (InstSz - (snd span) - (fst span)) (snd span) (fst span) inst): Expr ty (Bit (snd span))))
+           (only parsing).
 
   Definition instSize := extractFieldFromInst instSizeField.
   Definition opcode := extractFieldFromInst opcodeField.
@@ -168,53 +171,55 @@ Section Fields.
   Definition sp := 2.
 
   Definition imm := extractFieldFromInst immField.
-  Definition branchOffset := ({< extractFieldFromInst (31, 1),
-                                 extractFieldFromInst ( 7, 1),
-                                 extractFieldFromInst (25, 6),
-                                 extractFieldFromInst ( 8, 4), ConstBit WO~0 >}).
-  Definition jalOffset := ({< extractFieldFromInst (31,  1),
-                              extractFieldFromInst (12,  8),
-                              extractFieldFromInst (20,  1),
-                              extractFieldFromInst (21, 10), ConstBit WO~0 >}).
+  Definition branchOffset := doSimpl
+                               ({< extractFieldFromInst (31, 1),
+                                   extractFieldFromInst ( 7, 1),
+                                   extractFieldFromInst (25, 6),
+                                   extractFieldFromInst ( 8, 4), Const ty (Bit 1) Zmod.zero >}).
+  Definition jalOffset := doSimpl
+                            ({< extractFieldFromInst (31,  1),
+                                extractFieldFromInst (12,  8),
+                                extractFieldFromInst (20,  1),
+                                extractFieldFromInst (21, 10), Const ty (Bit 1) Zmod.one >}).
   Definition auiLuiOffset := extractFieldFromInst auiLuiField.
 
-  Definition isCompressed := isAllOnes (TruncLsb (InstSz - 2) 2 inst).
+  Definition isCompressed := Eval cbv -[Zmod.of_Z] in (isAllOnes (TruncLsb (InstSz - 2) 2 inst)).
 End Fields.
 
 Section Cap.
   Variable ty: Kind -> Type.
 
   Section CapPerms.
-    Definition decodePerms (rawPerms: Expr ty (Array CapPermSz Bool)) : LetExpr ty CapPerms :=
+    Definition decodePerms (rawPerms: Expr ty (Array CapPermSz Bool)) : LetExpr ty CapPerms := doSimpl
       ( LetE initPerms : CapPerms <- (ConstTDefK CapPerms) `{ "GL" <- rawPerms $[5] };
         RetE (ITE (rawPerms $[4])
                 (ITE (rawPerms $[3])
                    (##initPerms
-                      `{ "MC" <- ConstBool true }
-                      `{ "LD" <- ConstBool true }
+                      `{ "MC" <- ConstTBool true }
+                      `{ "LD" <- ConstTBool true }
                       `{ "SL" <- rawPerms $[2] }
                       `{ "LM" <- rawPerms $[1] }
-                      `{ "SD" <- ConstBool true }
+                      `{ "SD" <- ConstTBool true }
                       `{ "LG" <- rawPerms $[0] })
                    (ITE (rawPerms $[2])
                       (##initPerms
-                         `{ "MC" <- ConstBool true }
-                         `{ "LD" <- ConstBool true }
+                         `{ "MC" <- ConstTBool true }
+                         `{ "LD" <- ConstTBool true }
                          `{ "LM" <- rawPerms $[1] }
                          `{ "LG" <- rawPerms $[0] })
                       (ITE (Not (Or [rawPerms $[1]; rawPerms $[0]]))
                          (##initPerms
-                            `{ "MC" <- ConstBool true }
-                            `{ "SD" <- ConstBool true })
+                            `{ "MC" <- ConstTBool true }
+                            `{ "SD" <- ConstTBool true })
                          (##initPerms
                             `{ "LD" <- rawPerms $[1] }
                             `{ "SD" <- rawPerms $[0] }))))
                 (ITE (rawPerms $[3])
                    (##initPerms
-                      `{ "EX" <- ConstBool true }
+                      `{ "EX" <- ConstTBool true }
                       `{ "SR" <- rawPerms $[2] }
-                      `{ "MC" <- ConstBool true }
-                      `{ "LD" <- ConstBool true }
+                      `{ "MC" <- ConstTBool true }
+                      `{ "LD" <- ConstTBool true }
                       `{ "LM" <- rawPerms $[1] }
                       `{ "LG" <- rawPerms $[0] })
                    (##initPerms
@@ -222,77 +227,77 @@ Section Cap.
                       `{ "SE" <- rawPerms $[1] }
                       `{ "US" <- rawPerms $[0] })))).
 
-    Definition fixPerms (perms: Expr ty CapPerms) : Expr ty CapPerms :=
+    Definition fixPerms (perms: Expr ty CapPerms) : Expr ty CapPerms := doSimpl
       (ITE (And [perms`"EX"; perms`"LD"; perms`"MC"])
          (perms
-            `{ "U0" <- ConstBool false }
-            `{ "SE" <- ConstBool false }
-            `{ "US" <- ConstBool false }
-            `{ "SL" <- ConstBool false }
-            `{ "SD" <- ConstBool false })
+            `{ "U0" <- ConstTBool false }
+            `{ "SE" <- ConstTBool false }
+            `{ "US" <- ConstTBool false }
+            `{ "SL" <- ConstTBool false }
+            `{ "SD" <- ConstTBool false })
          (ITE (And [perms`"LD"; perms`"MC"; perms`"SD"])
             (perms
-               `{ "U0" <- ConstBool false }
-               `{ "SE" <- ConstBool false }
-               `{ "US" <- ConstBool false }
-               `{ "EX" <- ConstBool false }
-               `{ "SR" <- ConstBool false })
+               `{ "U0" <- ConstTBool false }
+               `{ "SE" <- ConstTBool false }
+               `{ "US" <- ConstTBool false }
+               `{ "EX" <- ConstTBool false }
+               `{ "SR" <- ConstTBool false })
             (ITE (And [perms`"LD"; perms`"MC"])
                (perms
-                  `{ "U0" <- ConstBool false }
-                  `{ "SE" <- ConstBool false }
-                  `{ "US" <- ConstBool false }
-                  `{ "EX" <- ConstBool false }
-                  `{ "SR" <- ConstBool false }
-                  `{ "SL" <- ConstBool false }
-                  `{ "SD" <- ConstBool false })
+                  `{ "U0" <- ConstTBool false }
+                  `{ "SE" <- ConstTBool false }
+                  `{ "US" <- ConstTBool false }
+                  `{ "EX" <- ConstTBool false }
+                  `{ "SR" <- ConstTBool false }
+                  `{ "SL" <- ConstTBool false }
+                  `{ "SD" <- ConstTBool false })
                (ITE (And [perms`"SD"; perms`"MC"])
                   (perms
-                     `{ "U0" <- ConstBool false }
-                     `{ "SE" <- ConstBool false }
-                     `{ "US" <- ConstBool false }
-                     `{ "EX" <- ConstBool false }
-                     `{ "SR" <- ConstBool false }
-                     `{ "LD" <- ConstBool false }
-                     `{ "SL" <- ConstBool false }
-                     `{ "LM" <- ConstBool false }
-                     `{ "LG" <- ConstBool false })
+                     `{ "U0" <- ConstTBool false }
+                     `{ "SE" <- ConstTBool false }
+                     `{ "US" <- ConstTBool false }
+                     `{ "EX" <- ConstTBool false }
+                     `{ "SR" <- ConstTBool false }
+                     `{ "LD" <- ConstTBool false }
+                     `{ "SL" <- ConstTBool false }
+                     `{ "LM" <- ConstTBool false }
+                     `{ "LG" <- ConstTBool false })
                   (ITE (Or [perms`"LD"; perms`"SD"])
                      (perms
-                     `{ "U0" <- ConstBool false }
-                     `{ "SE" <- ConstBool false }
-                     `{ "US" <- ConstBool false }
-                     `{ "EX" <- ConstBool false }
-                     `{ "SR" <- ConstBool false }
-                     `{ "MC" <- ConstBool false }
-                     `{ "SL" <- ConstBool false }
-                     `{ "LM" <- ConstBool false }
-                     `{ "LG" <- ConstBool false })
+                     `{ "U0" <- ConstTBool false }
+                     `{ "SE" <- ConstTBool false }
+                     `{ "US" <- ConstTBool false }
+                     `{ "EX" <- ConstTBool false }
+                     `{ "SR" <- ConstTBool false }
+                     `{ "MC" <- ConstTBool false }
+                     `{ "SL" <- ConstTBool false }
+                     `{ "LM" <- ConstTBool false }
+                     `{ "LG" <- ConstTBool false })
                      (perms
-                     `{ "EX" <- ConstBool false }
-                     `{ "SR" <- ConstBool false }
-                     `{ "MC" <- ConstBool false }
-                     `{ "LD" <- ConstBool false }
-                     `{ "SL" <- ConstBool false }
-                     `{ "LM" <- ConstBool false }
-                     `{ "SD" <- ConstBool false }
-                     `{ "LG" <- ConstBool false })))))).
+                     `{ "EX" <- ConstTBool false }
+                     `{ "SR" <- ConstTBool false }
+                     `{ "MC" <- ConstTBool false }
+                     `{ "LD" <- ConstTBool false }
+                     `{ "SL" <- ConstTBool false }
+                     `{ "LM" <- ConstTBool false }
+                     `{ "SD" <- ConstTBool false }
+                     `{ "LG" <- ConstTBool false })))))).
 
-    Definition encodePerms (perms: Expr ty CapPerms) : Expr ty (Array CapPermSz Bool) :=
-      FromBit (Array CapPermSz Bool)
-        ({< ToBit (perms`"GL"),
-            ( ITE (And [perms`"EX"; perms`"LD"; perms`"MC"])
-                {< ConstBit (2'b"01"), ToBit (perms`"SR"), ToBit (perms`"LM"), ToBit (perms`"LG") >}
-                (ITE (And [perms`"LD"; perms`"MC"; perms`"SD"])
-                   {< ConstBit (2'b"11"), ToBit (perms`"SL"), ToBit (perms`"LM"), ToBit (perms`"LG") >}
-                   (ITE (And [perms`"LD"; perms`"MC"])
-                      {< ConstBit (3'b"101"), ToBit (perms`"LM"), ToBit (perms`"LG") >}
-                      (ITE (And [perms`"SD"; perms`"MC"])
-                         (ConstBit (5'b"10000"))
-                         (ITE (Or [perms`"LD"; perms`"SD"])
-                            {< ConstBit (3'b"100"), ToBit (perms`"LD"), ToBit (perms`"SD") >}
-                            {< ConstBit (2'b"00"), ToBit (perms`"U0"), ToBit (perms`"SE"),
-                              ToBit (perms`"US") >}))))) >}).
+    Definition encodePerms (perms: Expr ty CapPerms) : Expr ty (Array CapPermSz Bool) := doSimpl
+      (FromBit (Array CapPermSz Bool)
+         ({< ToBit (perms`"GL"),
+             ( ITE (And [perms`"EX"; perms`"LD"; perms`"MC"])
+                 {< Const _ (Bit 2) (Zmod.of_Z _ 1), ToBit (perms`"SR"), ToBit (perms`"LM"), ToBit (perms`"LG") >}
+                 (ITE (And [perms`"LD"; perms`"MC"; perms`"SD"])
+                    {< Const _ (Bit 2) (Zmod.of_Z _ 3), ToBit (perms`"SL"), ToBit (perms`"LM"), ToBit (perms`"LG") >}
+                    (ITE (And [perms`"LD"; perms`"MC"])
+                       {< Const _ (Bit 3) (Zmod.of_Z _ 5), ToBit (perms`"LM"), ToBit (perms`"LG") >}
+                       (ITE (And [perms`"SD"; perms`"MC"])
+                          (Const _ (Bit 5) (Zmod.of_Z _ 16))
+                          (ITE (Or [perms`"LD"; perms`"SD"])
+                             {< Const _ (Bit 3) (Zmod.of_Z _ 4), ToBit (perms`"LD"), ToBit (perms`"SD") >}
+                             {< Const _ (Bit 2) (Zmod.of_Z _ 0), ToBit (perms`"U0"), ToBit (perms`"SE"),
+                               ToBit (perms`"US") >}))))) >})).
   End CapPerms.
 
   Section Sealed.
@@ -311,27 +316,28 @@ Section Cap.
     Section testAddr.
       Variable isExec: Expr ty Bool.
       Variable addr: Expr ty Addr.
-      Definition isSealableAddr :=
+      Definition isSealableAddr := doSimpl (
         And [isZero (TruncMsb (AddrSz - CapOTypeSz) CapOTypeSz addr);
-             Neq (TruncMsb 1 (CapOTypeSz - 1) (TruncLsb (AddrSz - CapOTypeSz) CapOTypeSz addr)) (ToBit isExec)].
+             Neq (TruncMsb 1 (CapOTypeSz - 1) (TruncLsb (AddrSz - CapOTypeSz) CapOTypeSz addr)) (ToBit isExec)]).
     End testAddr.
 
-    Definition createBackwardSentry (ie: Expr ty Bool) : Expr ty (Bit CapOTypeSz) := {< ConstBit 2'b"10", ToBit ie >}.
-    Definition createForwardSentry (change ie: Expr ty Bool): Expr ty (Bit CapOTypeSz) :=
-      {< ConstBit WO~0, ToBit change, ToBit ie >}.
+    Definition createBackwardSentry (ie: Expr ty Bool) : Expr ty (Bit CapOTypeSz) := doSimpl
+      {< Const _ (Bit 2) (Zmod.of_Z _ 2), ToBit ie >}.
+    Definition createForwardSentry (change ie: Expr ty Bool): Expr ty (Bit CapOTypeSz) := doSimpl
+      {< Const _ (Bit 1) Zmod.zero, ToBit change, ToBit ie >}.
   End Sealed.
 
   Section CapRelated.
     Definition get_E_from_cE (cE: Expr ty (Bit ExpSz)) : Expr ty (Bit ExpSz) := ITE (isAllOnes cE) $0 cE.
     Definition get_Mmsb_from_cE (cE: Expr ty (Bit ExpSz)) : Expr ty (Bit 1) := ToBit (isNotZero cE).
     Definition get_M_from_cE_cM (cE: Expr ty (Bit ExpSz)) (cM: Expr ty (Bit CapcMSz)) : Expr ty (Bit CapMSz) :=
-      ({< get_Mmsb_from_cE cE, cM >}).
+      doSimpl ({< get_Mmsb_from_cE cE, cM >}).
 
     Definition get_Mmsb_from_M (M: Expr ty (Bit CapMSz)) := TruncMsb 1 CapcMSz M.
     Definition get_cM_from_M (M: Expr ty (Bit CapMSz)) := TruncLsb 1 CapcMSz M.
     Definition get_cE_from_E_M (E: Expr ty (Bit ExpSz)) (M: Expr ty (Bit CapMSz)) :=
-      ITE (And [isZero E; FromBit Bool (get_Mmsb_from_M M)]) (ConstBit (wones ExpSz)) E.
-    Definition Emax := Eval compute in (Nat.pow 2 ExpSz - CapcMSz).
+      ITE (And [isZero E; FromBit Bool (get_Mmsb_from_M M)]) (Const _ (Bit ExpSz) (Zmod.of_Z _ (-1))) E.
+    Definition Emax := Eval compute in (Z.shiftl 1 ExpSz - CapcMSz).
     Definition get_ECorrected_from_E (E: Expr ty (Bit ExpSz)) : Expr ty (Bit ExpSz) :=
       (ITE (Sge E $Emax) $Emax E).
     Definition get_E_from_ECorrected (ECorrected: Expr ty (Bit ExpSz)): Expr ty (Bit ExpSz) := ECorrected.
@@ -341,8 +347,9 @@ Section Cap.
     Variable base: Expr ty (Bit (AddrSz + 1)).
     Variable ECorrected: Expr ty (Bit ExpSz).
 
-    Definition getRepresentableLimit :=
-      Add [base; {< (Sll (ConstBit (ZToWord (AddrSz + 1 - CapMSz) 1)) ECorrected), ConstBit (wzero CapMSz) >}].
+    Definition getRepresentableLimit := doSimpl (
+      Add [base; {< (Sll (Const _ (Bit (AddrSz + 1 - CapMSz)) Zmod.one) ECorrected),
+            Const _ (Bit CapMSz) Zmod.zero >}]).
   End Representable.
 
   Section BaseLength.
@@ -356,7 +363,7 @@ Section Cap.
     Variable M: Expr ty (Bit CapMSz).
     Variable B: Expr ty (Bit CapBSz).
 
-    Definition get_base_length_from_ECorrected_M_B : LetExpr ty BaseLength :=
+    Definition get_base_length_from_ECorrected_M_B : LetExpr ty BaseLength := doSimpl
       ( LetE aMidTop: Addr <- Srl addr ECorrected;
         LetE aMid: Bit CapBSz <- TruncLsb (AddrSz - CapBSz) CapBSz #aMidTop;
         LetE aTop: Bit (AddrSz - CapBSz) <- TruncMsb (AddrSz - CapBSz) CapBSz #aMidTop;
@@ -376,17 +383,20 @@ Section Cap.
 
     Local Notation shift_m_e sm m e :=
       (ITE (FromBit Bool (TruncMsb 1 sm m))
-         (mkPair (Add [ZeroExtend 1 (TruncMsb sm 1 m); ZeroExtend sm (TruncLsb sm 1 m)]) (Add [e; $1]))
-         (mkPair m e)).
+         ((STRUCT { "fst" ::= Add [ZeroExtend 1 (TruncMsb sm 1 m); ZeroExtend sm (TruncLsb sm 1 m)];
+                    "snd" ::= Add [e; $1] }) : Expr ty (Pair (Bit (sm + 1)) (Bit ExpSz)))
+         ((STRUCT { "fst" ::= m;
+                    "snd" ::= e }) : Expr ty (Pair (Bit (sm + 1)) (Bit ExpSz))))
+        (sm in scope Z_scope, m in scope guru_scope, only parsing).
 
     Local Notation shift_m_e_twice sm m e :=
       (LetE me: Pair (Bit (sm + 1)) (Bit ExpSz) <- shift_m_e sm m e;
-       LetE m1e1: Pair (Bit (sm + 1)) (Bit ExpSz) <- shift_m_e sm (#me`"fst") (#me`"snd");
+       LetE m1e1: Pair (Bit (sm + 1)) (Bit ExpSz) <- shift_m_e sm (##me`"fst") (##me`"snd");
        @RetE _ (Pair (Bit sm) (Bit ExpSz))
          (STRUCT {
-              "fst" ::= (TruncLsb 1 sm (#m1e1`"fst"));
-              "snd" ::= (#m1e1`"snd") })) (sm in scope nat_scope).
-
+              "fst" ::= ((TruncLsb 1 sm (##m1e1`"fst")) : Expr ty (Bit sm));
+              "snd" ::= (#m1e1`"snd") })) (sm in scope Z_scope, only parsing).
+    
     Definition Bounds :=
       STRUCT_TYPE {
           "E" :: Bit ExpSz;
@@ -396,18 +406,22 @@ Section Cap.
           "exact" :: Bool }.
 
     (* TODO check when length = 2^32-1 and base = 2^32-1 *)
-    Definition calculateBounds : LetExpr ty Bounds :=
+    Definition calculateBounds : LetExpr ty Bounds := doSimpl
       ( LetE lenTrunc : Bit (AddrSz + 1 - CapBSz) <- TruncMsb (AddrSz + 1 - CapBSz) CapBSz length;
-        LetE eInit: Bit ExpSz <- Add [$(AddrSz + 1 - CapBSz); Inv (countLeadingZeros _ #lenTrunc)];
-        LetE e_lgCeilAdd1: Bool <- Or [isNotZero (TruncLsb (AddrSz + 1 - CapBSz) CapBSz length);
-                                       (Neq (countOnes ExpSz #lenTrunc) $1)];
+        LetE eInit: Bit ExpSz <-
+                      Add [$(AddrSz + 1 - CapBSz);
+                           Inv (countLeadingZerosArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) _)];
+        LetE e_lgCeilAdd1: Bool <-
+                             Or [isNotZero (TruncLsb (AddrSz + 1 - CapBSz) CapBSz length);
+                                 (Neq (countOnesArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) ExpSz) $1)];
         LetE eLength: Bit ExpSz <-
                         Add [#eInit; ZeroExtendTo ExpSz (ToBit (ITE IsSubset (isZero #lenTrunc) #e_lgCeilAdd1))];
-        LetE eBaseUncorrected : Bit (Nat.log2_up (AddrSz + 1)) <- countTrailingZeros _ base;
-        LetE eBase <- TruncLsb 1 ExpSz (ITE (Sge #eBaseUncorrected $Emax) $Emax #eBaseUncorrected);
-        LetE fixedBase_eBase_lt_eLength <- And [IsFixedBase; Slt #eBase #eLength];
-        LetE e <- ITE #fixedBase_eBase_lt_eLength #eBase #eLength;
-        LetE mask_e : Bit (AddrSz + 2 - CapBSz) <- Inv (Sll (ConstBit (wones (AddrSz + 2 - CapBSz))) #e);
+        LetE eBaseUncorrected : Bit (Z.log2_up (AddrSz + 1)) <-
+                                  countTrailingZerosArray (mkBoolArray (AddrSz + 1) base) _;
+        LetE eBase : Bit ExpSz <- TruncLsb 1 ExpSz (ITE (Sge #eBaseUncorrected $Emax) $Emax #eBaseUncorrected);
+        LetE fixedBase_eBase_lt_eLength : Bool <- And [IsFixedBase; Slt #eBase #eLength];
+        LetE e: Bit ExpSz <- ITE #fixedBase_eBase_lt_eLength #eBase #eLength;
+        LetE mask_e : Bit (AddrSz + 2 - CapBSz) <- Inv (Sll (ConstBit (Zmod.of_Z _ (-1))) #e);
         LetE base_mod_e : Bit (AddrSz + 2 - CapBSz) <-
                             Band [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) base; #mask_e];
         LetE length_mod_e : Bit (AddrSz + 2 - CapBSz) <-
@@ -417,22 +431,22 @@ Section Cap.
         LetE lost_sum : Bool <- isNotZero (Band [#sum_mod_e; #mask_e]);
         LetE iCeil : Bit 2 <- Add [#iFloor; ZeroExtendTo 2 (ToBit #lost_sum)];
         LetE d : Bit (CapBSz + 2) <- TruncLsb (AddrSz - 1 - CapBSz) (CapBSz + 2) (Srl length #e);
-        LetE m : Bit (CapBSz + 2) <- Add [ITE #fixedBase_eBase_lt_eLength $(Nat.pow 2 CapMSz - 1) #d;
+        LetE m : Bit (CapBSz + 2) <- Add [ITE #fixedBase_eBase_lt_eLength $(Z.shiftl 1 CapMSz - 1) #d;
                                             ZeroExtend CapBSz (ITE IsSubset $0 #iCeil)];
         LETE m1e1: Pair (Bit (CapBSz + 1)) (Bit ExpSz) <- shift_m_e_twice (CapBSz + 1) #m #e;
-        LETE m2e2: Pair (Bit CapBSz) (Bit ExpSz) <- shift_m_e_twice CapBSz (#m1e1`"fst") (#m1e1`"snd");
+        LETE m2e2: Pair (Bit CapBSz) (Bit ExpSz) <- shift_m_e_twice (CapBSz) (##m1e1`"fst") (##m1e1`"snd");
         LetE mf: Bit CapBSz <- #m2e2`"fst";
         LetE efUnsat: Bit ExpSz <- #m2e2`"snd";
         LetE isESaturated: Bool <- Sgt #efUnsat $(AddrSz + 1 - CapBSz);
-        LetE ef <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
-        LetE cram : Bit (AddrSz + 1) <- Sll (ConstBit (wones (AddrSz + 1))) #ef;
+        LetE ef: Bit ExpSz <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
+        LetE cram : Bit (AddrSz + 1) <- Sll (ConstBit (Zmod.of_Z _ (-1))) #ef;
         LetE mask_ef : Bit (AddrSz + 1) <- Inv #cram;
         LetE lost_base : Bool <- isNotZero (Band [base; #mask_ef]);
-        LetE outBase <-  Band [base; #cram];
+        LetE outBase : Bit (AddrSz + 1) <-  Band [base; #cram];
         (* TODO for subset without fixed base.
            + (ZeroExtend Xlen (pack (IsSubset && #lost_base &&
            !(#isESaturated && ((base .& #cram) == #cram))))) << #ef *)
-        LetE outLength: Bit (AddrSz + 1) <- Sll (ZeroExtendTo (AddrSz + 1) #mf) #ef;
+        LetE outLength: Bit (AddrSz + 1) <- Sll (ZeroExtendTo (AddrSz + 1) ##mf) #ef;
         @RetE _ Bounds (STRUCT {
                             "E" ::= #ef;
                             "cram" ::= #cram;
@@ -444,7 +458,7 @@ Section Cap.
   Section EncodeCap.
     Variable ecap: Expr ty ECap.
 
-    Definition encodeCap: LetExpr ty Cap :=
+    Definition encodeCap: LetExpr ty Cap := doSimpl
       ( LetE perms <- encodePerms (ecap`"perms");
         LetE E <- ecap`"E";
         LetE ECorrected <- get_ECorrected_from_E #E;
@@ -464,7 +478,7 @@ Section Cap.
     Variable cap: Expr ty Cap.
     Variable addr: Expr ty Addr.
 
-    Definition decodeCap: LetExpr ty ECap :=
+    Definition decodeCap: LetExpr ty ECap := doSimpl
       ( LETE perms <- decodePerms (cap`"p");
         LetE E <- get_E_from_cE (cap`"cE");
         LetE ECorrected <- get_ECorrected_from_E #E;
@@ -626,7 +640,7 @@ Section Decode.
 
   Variable inst: Expr ty Inst.
 
-  Definition decodeFullInst: LetExpr ty DecodeOut :=
+  Definition decodeFullInst: LetExpr ty DecodeOut := doSimpl
     ( LetE op: Bit 5 <- opcode inst;
       LetE f3: Bit 3 <- funct3 inst;
       LetE f7: Bit 7 <- funct7 inst;
@@ -636,25 +650,25 @@ Section Decode.
       LetE rs2Idx: Bit RegFixedIdSz <- rs2Fixed inst;
       LetE immVal: Bit (snd immField) <- imm inst;
 
-      LetE Lui: Bool <- Eq #op (ConstBit 5'b"01101");
-      LetE AuiPcc: Bool <- Eq #op (ConstBit 5'b"00101");
-      LetE AuiCgp: Bool <- Eq #op (ConstBit 5'b"11110");
-      LetE CJal: Bool <- Eq #op (ConstBit 5'b"11011");
-      LetE CJalr: Bool <- And [Eq #op (ConstBit 5'b"11001"); isZero #f3];
-      LetE Branch: Bool <- And [Eq #op (ConstBit 5'b"11000"); Neq #f3`[2:1] (ConstBit 2'b"01")];
+      LetE Lui: Bool <- Eq #op (ConstBit (bits.of_Z 5 13));
+      LetE AuiPcc: Bool <- Eq #op (ConstBit (bits.of_Z 5 5));
+      LetE AuiCgp: Bool <- Eq #op (ConstBit (bits.of_Z 5 30));
+      LetE CJal: Bool <- Eq #op (ConstBit (bits.of_Z 5 27));
+      LetE CJalr: Bool <- And [Eq #op (ConstBit (bits.of_Z 5 25)); isZero #f3];
+      LetE Branch: Bool <- And [Eq #op (ConstBit (bits.of_Z 5 24)); Neq #f3`[2:1] (ConstBit (bits.of_Z 2 1))];
 
       LetE BranchLt: Bool <- FromBit Bool (#f3`[2:2]);
       LetE BranchNeg: Bool <- FromBit Bool (#f3`[0:0]);
       LetE BranchUnsigned: Bool <- FromBit Bool (#f3`[1:1]);
 
       LetE Load: Bool <- And [isZero #op; Not (isAllOnes #f3)];
-      LetE Store: Bool <- And [Eq #op (ConstBit 5'b"01000"); Not (FromBit Bool (#f3`[2:2]))];
+      LetE Store: Bool <- And [Eq #op (ConstBit (bits.of_Z 5 8)); Not (FromBit Bool (#f3`[2:2]))];
 
       LetE LoadUnsigned: Bool <- FromBit Bool (#f3`[2:2]);
       LetE memSz: Bit MemSzSz <- #f3`[1:0];
 
-      LetE immediate: Bool <- Eq #op (ConstBit 5'b"00100");
-      LetE nonImmediate: Bool <- Eq #op (ConstBit 5'b"01100");
+      LetE immediate: Bool <- Eq #op (ConstBit (bits.of_Z 5 4));
+      LetE nonImmediate: Bool <- Eq #op (ConstBit (bits.of_Z 5 12));
       LetE addF3: Bool <- Eq #f3 $0;
       LetE sllF3: Bool <- Eq #f3 $1;
       LetE sltF3: Bool <- Eq #f3 $2;
@@ -664,7 +678,7 @@ Section Decode.
       LetE orF3: Bool <- Eq #f3 $6;
       LetE andF3: Bool <- Eq #f3 $7;
       LetE slF7: Bool <- isZero #f7;
-      LetE sraSubF7: Bool <- Eq #f7 (ConstBit 7'b"0100000");
+      LetE sraSubF7: Bool <- Eq #f7 (ConstBit (bits.of_Z 7 32));
       LetE nonImmF7: Bool <- isZero #f7;
 
       LetE AddI: Bool <- And [#immediate; #addF3];
@@ -688,18 +702,18 @@ Section Decode.
       LetE OrOp: Bool <- And [#nonImmediate; #orF3; #nonImmF7];
       LetE AndOp: Bool <- And [#nonImmediate; #andF3; #nonImmF7];
 
-      LetE isFence: Bool <- Eq #op (ConstBit 5'b"00011");
+      LetE isFence: Bool <- Eq #op (ConstBit (bits.of_Z 5 3));
 
       LetE Fence: Bool <- And [#isFence; isZero #f3];
       LetE FenceI: Bool <- And [#isFence; Eq #f3 $1];
 
-      LetE isSys: Bool <- Eq #op (ConstBit 5'b"11100");
+      LetE isSys: Bool <- Eq #op (ConstBit (bits.of_Z 5 28));
 
       LetE eHandle: Bool <- And [#isSys; isZero #f3; isZero #rdIdx; isZero #rs1Idx];
       LetE ECall: Bool <- And [#eHandle; isZero #f7; isZero #rs2Idx];
-      LetE Wfi: Bool <- And [#eHandle; Eq #f7 (ConstBit 7'b"0001000"); Eq #rs2Idx (ConstBit 5'b"00101")];
+      LetE Wfi: Bool <- And [#eHandle; Eq #f7 (ConstBit (bits.of_Z 7 8)); Eq #rs2Idx (ConstBit (bits.of_Z 5 5))];
       LetE EBreak: Bool <- And [#eHandle; isZero #f7; Eq #rs2Idx $1];
-      LetE MRet: Bool <- And [#eHandle; Eq #f7 (ConstBit 7'b"0011000"); Eq #rs2Idx (ConstBit 5'b"00010")];
+      LetE MRet: Bool <- And [#eHandle; Eq #f7 (ConstBit (bits.of_Z 7 24)); Eq #rs2Idx (ConstBit (bits.of_Z 5 2))];
 
       LetE CsrRw: Bool <- And [#isSys; Eq (#f3`[1:0]) $1];
       LetE CsrSet: Bool <- And [#isSys; Eq (#f3`[1:0]) $2];
@@ -707,42 +721,42 @@ Section Decode.
 
       LetE CsrImm: Bool <- And [#isSys; FromBit Bool (#f3`[2:2])];
 
-      LetE cheriot: Bool <- Eq #op (ConstBit 5'b"10110");
+      LetE cheriot: Bool <- Eq #op (ConstBit (bits.of_Z 5 22));
       LetE cheriotNonImm: Bool <- Eq #cheriot (isZero #f3);
-      LetE cheriot1Src: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"7f")];
+      LetE cheriot1Src: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x7f))];
 
       LetE CGetPerm: Bool <- And [#cheriot1Src; Eq #rs2Idx $0];
       LetE CGetType: Bool <- And [#cheriot1Src; Eq #rs2Idx $1];
       LetE CGetBase: Bool <- And [#cheriot1Src; Eq #rs2Idx $2];
       LetE CGetLen: Bool <- And [#cheriot1Src; Eq #rs2Idx $3];
       LetE CGetTag: Bool <- And [#cheriot1Src; Eq #rs2Idx $4];
-      LetE CGetAddr: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit 5'h"f")];
-      LetE CGetHigh: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit 5'h"17")];
-      LetE CGetTop: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit 5'h"18")];
+      LetE CGetAddr: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit (bits.of_Z 5 0xf))];
+      LetE CGetHigh: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit (bits.of_Z 5 0x17))];
+      LetE CGetTop: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit (bits.of_Z 5 0x18))];
 
-      LetE CSeal: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"b")];
-      LetE CUnseal: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"c")];
-      LetE CAndPerm: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"d")];
+      LetE CSeal: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0xb))];
+      LetE CUnseal: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0xc))];
+      LetE CAndPerm: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0xd))];
       
-      LetE CSetAddr: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"10")];
-      LetE CIncAddr: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"11")];
+      LetE CSetAddr: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x10))];
+      LetE CIncAddr: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x11))];
       LetE CIncAddrImm: Bool <- And [#cheriot; Eq #f3 $1];
       
-      LetE CSetBounds: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"8")];
-      LetE CSetBoundsExact: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"9")];
-      LetE CSetBoundsRoundDown: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"a")];
-      LetE CSetBoundsImm: Bool <- And [#cheriot; Eq #f3 $2; Eq #f7 (ConstBit 7'h"8")];
+      LetE CSetBounds: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x8))];
+      LetE CSetBoundsExact: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x9))];
+      LetE CSetBoundsRoundDown: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0xa))];
+      LetE CSetBoundsImm: Bool <- And [#cheriot; Eq #f3 $2; Eq #f7 (ConstBit (bits.of_Z 7 0x8))];
 
-      LetE CSetHigh: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"16")];
-      LetE CClearTag: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit 5'h"b")];
+      LetE CSetHigh: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x16))];
+      LetE CClearTag: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit (bits.of_Z 5 0xb))];
 
-      LetE CSub: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"14")];
-      LetE CMove: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit 5'h"a")];
+      LetE CSub: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 0x14))];
+      LetE CMove: Bool <- And [#cheriot1Src; Eq #rs2Idx (ConstBit (bits.of_Z 5 0xa))];
       
-      LetE CTestSubset: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"20")];
-      LetE CSetEqual: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"21")];
+      LetE CTestSubset: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 20))];
+      LetE CSetEqual: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 21))];
 
-      LetE CSpecialRw: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit 7'h"1")];
+      LetE CSpecialRw: Bool <- And [#cheriotNonImm; Eq #f7 (ConstBit (bits.of_Z 7 1))];
 
       LetE Crrl: Bool <- And [#cheriot1Src; Eq #rs2Idx $8];
       LetE Cram: Bool <- And [#cheriot1Src; Eq #rs2Idx $9];
@@ -772,7 +786,7 @@ Section Decode.
 
       LetE CChangeAddr: Bool <- Or [#CIncAddr; #CIncAddrImm; #CSetAddr; #AuiPcc];
       
-      LetE isCsr: Bool <- And [#isSys; isNotZero (#f3`[1:0])];
+      LetE isCsr: Bool <- And [#isSys; isNotZero (##f3`[1:0])];
 
       LetE SignExtendImmNoLoadNoCJalr <- Or [#AddI; #SltI; #XorI; #OrI; #AndI; #CIncAddrImm];
       LetE SignExtendImm: Bool <- Or [#SignExtendImmNoLoadNoCJalr; #Load; #CJalr];
@@ -793,7 +807,7 @@ Section Decode.
                                  #isCsr; #cheriot];
 
       LetE ReadReg2: Bool <- Or [#Branch; #Store; #immediate;
-                                 And [#cheriotNonImm; Not (Or [Eq #f7 (ConstBit 7'h"7f"); Eq #f7 $1])]];
+                                 And [#cheriotNonImm; Not (Or [Eq #f7 (ConstBit (bits.of_Z 7 0x7f)); Eq #f7 $1])]];
 
       LetE WriteReg: Bool <- Or [#Lui; #AuiAll; #CJal; #CJalr; #Load; #immediate; #nonImmediate;
                                  #isCsr; #cheriot];
@@ -810,7 +824,7 @@ Section Decode.
                                        ITE0 #Branch (SignExtendTo DecImmSz (branchOffset inst));
                                        ITE0 #CJal (jalOffset inst);
                                        ITE0 #AuiAll (SignExtend 1 #auiLuiOffsetInst);
-                                       ITE0 #Lui ({<#auiLuiOffsetInst, ConstBit WO~0>})
+                                       ITE0 #Lui ({<#auiLuiOffsetInst, Const _ (Bit 1) Zmod.zero>})
                      ];
       
       LetE ImmExtRight: Bool <- Or [#AuiAll; #Lui];
@@ -896,7 +910,7 @@ Section Decode.
                 "CsrClear" ::= #CsrClear ;
                   "CsrImm" ::= #CsrImm })).
 
-  Definition decodeCompQ0: LetExpr ty DecodeOut :=
+  Definition decodeCompQ0: LetExpr ty DecodeOut := doSimpl
     ( LetE rdIdx: Bit RegFixedIdSz <- ZeroExtendTo RegFixedIdSz (inst`[4:2]);
       LetE rs2Idx: Bit RegFixedIdSz <- ZeroExtendTo RegFixedIdSz (inst`[4:2]);
       LetE f3: Bit 3 <- inst`[15:13];
@@ -910,9 +924,9 @@ Section Decode.
       LetE NotIllegal: Bool <- And [isNotZero (inst`[15:0]); Or [isZero #f3; FromBit Bool (#memSz`[1:1])]];
       LetE immMem_6_3: Bit 4 <- ({< (inst`[5:5]), (inst`[12:10]) >});
       LetE memDecImm <- ITE (FromBit Bool (#memSz`[0:0]))
-                          ({<(inst`[6:6]), #immMem_6_3, ConstBit (wzero 3)>})
-                          ({< (ConstBit WO~0), #immMem_6_3, (inst`[6:6]), ConstBit (wzero 2)>});
-      LetE cIncImm <-  ({<(inst`[10:7]), (inst`[12:11]), (inst`[5:5]), (inst`[6:6]) , ConstBit (wzero 2)>});
+                          ({<(inst`[6:6]), #immMem_6_3, Const _ (Bit 3) Zmod.zero>})
+                          ({< (Const _ (Bit 1) Zmod.zero), #immMem_6_3, (inst`[6:6]), Const _ (Bit 2) Zmod.zero>});
+      LetE cIncImm <-  ({<(inst`[10:7]), (inst`[12:11]), (inst`[5:5]), (inst`[6:6]) , Const _ (Bit 2) Zmod.zero>});
       LetE decImm: Bit DecImmSz <- ITE #CIncAddrImm
                                      (SignExtendTo (ty := ty) DecImmSz #cIncImm)
                                      (SignExtendTo DecImmSz #memDecImm);
@@ -994,7 +1008,7 @@ Section Decode.
                 "CsrClear" ::= ConstTBool false ;
                   "CsrImm" ::= ConstTBool false })).
 
-  Definition decodeCompQ1: LetExpr ty DecodeOut :=
+  Definition decodeCompQ1: LetExpr ty DecodeOut := doSimpl
     ( LetE f3: Bit 3 <- inst`[15:13];
       LetE rs1Idx: Bit RegFixedIdSz <- ITE (FromBit Bool (#f3`[2:2]))
                                          (ZeroExtendTo RegFixedIdSz (inst`[9:7]))
@@ -1009,12 +1023,12 @@ Section Decode.
 
       LetE cjalImm: Bit DecImmSz <- SignExtendTo DecImmSz ({<inst`[12:12], inst`[8:8], inst`[10:9],
                                           inst`[6:6], inst`[7:7], inst`[2:2], inst`[11:11], inst`[5:3],
-                                          ConstBit WO~0>});
+                                          Const _ (Bit 1) Zmod.zero>});
       
       LetE CIncAddrImm: Bool <- And [Eq #f3 $3; Eq inst`[11:7] $2];
 
       LetE cIncImm: Bit DecImmSz <- SignExtendTo DecImmSz ({< inst`[12:12], inst`[4:3], inst`[5:5],
-                                          inst`[2:2], inst`[6:6], ConstBit (wzero 4) >});
+                                          inst`[2:2], inst`[6:6], Const _ (Bit 4) Zmod.zero>});
 
       LetE Lui: Bool <- And [Eq #f3 $3; Neq inst`[11:7] $2];
 
@@ -1036,15 +1050,16 @@ Section Decode.
       LetE BranchNeg: Bool <- FromBit Bool (#f3`[0:0]);
 
       LetE branchImm: Bit DecImmSz <- SignExtendTo DecImmSz ({<inst`[12:12], inst`[6:5],
-                                            inst`[2:2], inst`[11:10], inst`[4:3], ConstBit WO~0 >});
+                                            inst`[2:2], inst`[11:10], inst`[4:3], Const _ (Bit 1) Zmod.zero>});
 
       LetE normalImm: Bit 6 <- ({< inst`[12:12], inst`[6:2] >});
 
-      LetE decImm: Bit DecImmSz <- caseDefault [(#CJal, #cjalImm);
-                                                (#Branch, #branchImm);
-                                                (#CIncAddrImm, #cIncImm);
-                                                (#Lui, SignExtendTo DecImmSz ({<#normalImm, ConstBit WO~0>}))]
-                                     (SignExtendTo (ty := ty) DecImmSz #normalImm);
+      LetE decImm: Bit DecImmSz <- caseDefault
+                     [(#CJal, #cjalImm);
+                      (#Branch, #branchImm);
+                      (#CIncAddrImm, #cIncImm);
+                      (#Lui, SignExtendTo DecImmSz {<#normalImm, Const _ (Bit 1) Zmod.zero>})]
+                     (SignExtendTo (ty := ty) DecImmSz #normalImm);
 
       LetE ImmForData: Bool <- Or [#AddI; #CIncAddrImm; #Lui; #SrlI; #SraI; #AndI];
       LetE ImmForAddr: Bool <- Or [#CJal; #Branch];
@@ -1060,7 +1075,7 @@ Section Decode.
                   "rs2Idx" ::= #rs2Idx ;
                    "rdIdx" ::= #rdIdx ;
                   "decImm" ::= #decImm ;
-                   "memSz" ::= Const ty (Bit MemSzSz) (wzero _) ;
+                   "memSz" ::= Const ty (Bit MemSzSz) Zmod.zero ;
 
               "Compressed" ::= ConstTBool true;
              "ImmExtRight" ::= #Lui ;
@@ -1133,7 +1148,7 @@ Section Decode.
                 "CsrClear" ::= ConstTBool false ;
                   "CsrImm" ::= ConstTBool false })).
 
-  Definition decodeCompQ2: LetExpr ty DecodeOut :=
+  Definition decodeCompQ2: LetExpr ty DecodeOut := doSimpl
     ( LetE f3: Bit 3 <- inst`[15:13];
 
       LetE rs2Idx: Bit RegFixedIdSz <- inst`[6:2];
@@ -1151,7 +1166,7 @@ Section Decode.
       LetE Load: Bool <- Eq #f3`[2:1] $1;
       LetE Store: Bool <- Eq #f3`[2:1] $3;
 
-      LetE memSz: Bit MemSzSz <- ({< ConstBit WO~1, (#f3`[0:0])>});
+      LetE memSz: Bit MemSzSz <- ({< Const _ (Bit 1) Zmod.zero, (#f3`[0:0])>});
 
       LetE Add: Bool <- And [Eq #f3 $4; isNotZero #rs2Idx; isNotZero (inst`[11:7])];
       LetE CJalr: Bool <- And [Eq #f3 $4; isZero #rs2Idx; isNotZero (inst`[11:7])];
@@ -1160,10 +1175,10 @@ Section Decode.
       LetE sllImm: Bit DecImmSz <- ZeroExtendTo DecImmSz #rs2Idx;
       LetE ldImm: Bit 9 <- ({< ITE0 (FromBit Bool (#f3`[0:0])) (inst`[4:4]), (inst`[3:2]), (inst`[12:12]),
                         (inst`[6:5]), ITE0 (Not (FromBit Bool (#f3`[0:0]))) (inst`[4:4]),
-                        ConstBit (wzero 2) >});
+                        Const _ (Bit 2) Zmod.zero >});
 
       LetE stImm: Bit 9 <- ({< ITE0 (FromBit Bool (#f3`[0:0])) (inst`[9:9]), (inst`[8:7]), (inst`[12:10]),
-                               ITE0 (Not (FromBit Bool (#f3`[0:0]))) (inst`[9:9]), ConstBit (wzero 2) >});
+                               ITE0 (Not (FromBit Bool (#f3`[0:0]))) (inst`[9:9]), Const _ (Bit 2) Zmod.zero>});
 
       LetE decImm: Bit DecImmSz <- Or [ITE0 #SllI #sllImm;
                                        ITE0 (Or [#Load; #Store]) (ZeroExtendTo DecImmSz (ITE #Load #ldImm #stImm))];
@@ -1247,7 +1262,7 @@ Section Decode.
                            "CsrImm" ::= ConstTBool false };
       RetE #res).
 
-  Definition decode : LetExpr ty DecodeOut :=
+  Definition decode : LetExpr ty DecodeOut := doSimpl
     ( LETE compQ0: DecodeOut <- decodeCompQ0;
       LETE compQ1: DecodeOut <- decodeCompQ1;
       LETE compQ2: DecodeOut <- decodeCompQ2;
@@ -1272,116 +1287,118 @@ Section Alu.
   Variable pcCap: Expr ty ECap.
 
   Variable aluIn : Expr ty AluIn.
+
+  Local Notation           pcAluOut := (aluIn`"pcAluOut" : Expr ty PcAluOut ).
+  Local Notation              pcVal := (pcAluOut`"pcVal" : Expr ty Addr ).
+  Local Notation    BoundsException := (pcAluOut`"BoundsException" : Expr ty Bool ).
   
-  Local Definition              pcVal: Expr ty Addr := aluIn`"pcAluOut"`"pcVal".
-  Local Definition    BoundsException: Expr ty Bool := aluIn`"pcAluOut"`"BoundsException".
+  Local Notation               regs := (aluIn`"regs" : Expr ty (Array NumRegs _) ).
+  Local Notation              waits := (aluIn`"waits" : Expr ty (Array NumRegs _) ).
+
+  Local Notation               csrs := (aluIn`"csrs" : Expr ty Csrs ).
+  Local Notation             mcycle := (csrs`"mcycle" : Expr ty (Bit DXlen) ).
+  Local Notation              mtime := (csrs`"mtime" : Expr ty (Bit DXlen) ).
+  Local Notation           minstret := (csrs`"minstret" : Expr ty (Bit DXlen) ).
+  Local Notation              mshwm := (csrs`"mshwm" : Expr ty (Bit _) ).
+  Local Notation             mshwmb := (csrs`"mshwmb" : Expr ty (Bit _) ).
+
+  Local Notation                 ie := (csrs`"ie" : Expr ty Bool ).
+  Local Notation          interrupt := (csrs`"interrupt" : Expr ty Bool ).
+  Local Notation             mcause := (csrs`"mcause" : Expr ty (Bit McauseSz) ).
+  Local Notation              mtval := (csrs`"mtval" : Expr ty Addr ).
+
+  Local Notation               scrs := (aluIn`"scrs" : Expr ty Scrs ).
+  Local Notation               mtcc := (scrs`"mtcc" : Expr ty FullECapWithTag ).
+  Local Notation               mtdc := (scrs`"mtdc" : Expr ty FullECapWithTag ).
+  Local Notation           mscratch := (scrs`"mscratchc" : Expr ty FullECapWithTag ).
+  Local Notation              mepcc := (scrs`"mepcc" : Expr ty FullECapWithTag ).
+
+  Local Notation         interrupts := (aluIn`"interrupts" : Expr ty Interrupts ).
+  Local Notation                mei := (interrupts`"mei" : Expr ty Bool ).
+  Local Notation                mti := (interrupts`"mti" : Expr ty Bool ).
+
+  Local Notation          decodeOut := (aluIn`"decodeOut" : Expr ty DecodeOut ).
+  Local Notation        rs1IdxFixed := (decodeOut`"rs1Idx" : Expr ty (Bit RegFixedIdSz) ).
+  Local Notation        rs2IdxFixed := (decodeOut`"rs2Idx" : Expr ty (Bit RegFixedIdSz) ).
+  Local Notation         rdIdxFixed := (decodeOut`"rdIdx" : Expr ty (Bit RegFixedIdSz) ).
+  Local Notation             decImm := (decodeOut`"decImm" : Expr ty (Bit DecImmSz) ).
+  Local Notation              memSz := (decodeOut`"memSz" : Expr ty (Bit MemSzSz) ).
+
+  Local Notation         Compressed := (decodeOut`"Compressed" : Expr ty Bool ).
+  Local Notation        ImmExtRight := (decodeOut`"ImmExtRight" : Expr ty Bool ).
+  Local Notation         ImmForData := (decodeOut`"ImmForData" : Expr ty Bool ).
+  Local Notation         ImmForAddr := (decodeOut`"ImmForAddr" : Expr ty Bool ).
+
+  Local Notation           ReadReg1 := (decodeOut`"ReadReg1" : Expr ty Bool ).
+  Local Notation           ReadReg2 := (decodeOut`"ReadReg2" : Expr ty Bool ).
+  Local Notation           WriteReg := (decodeOut`"WriteReg" : Expr ty Bool ).
+
+  Local Notation         MultiCycle := (decodeOut`"MultiCycle" : Expr ty Bool ).
   
-  Local Definition  regs: Expr ty (Array NumRegs _) := aluIn`"regs".
-  Local Definition waits: Expr ty (Array NumRegs _) := aluIn`"waits".
+  Local Notation             Src1Pc := (decodeOut`"Src1Pc" : Expr ty Bool ).
+  Local Notation            InvSrc2 := (decodeOut`"InvSrc2" : Expr ty Bool ).
+  Local Notation           Src2Zero := (decodeOut`"Src2Zero" : Expr ty Bool ).
+  Local Notation     ZeroExtendSrc1 := (decodeOut`"ZeroExtendSrc1" : Expr ty Bool ).
+  Local Notation             Branch := (decodeOut`"Branch" : Expr ty Bool ).
+  Local Notation           BranchLt := (decodeOut`"BranchLt" : Expr ty Bool ).
+  Local Notation          BranchNeg := (decodeOut`"BranchNeg" : Expr ty Bool ).
+  Local Notation              SltOp := (decodeOut`"Slt" : Expr ty Bool ).
+  Local Notation              AddOp := (decodeOut`"Add" : Expr ty Bool ).
+  Local Notation              XorOp := (decodeOut`"Xor" : Expr ty Bool ).
+  Local Notation               OrOp := (decodeOut`"Or" : Expr ty Bool ).
+  Local Notation              AndOp := (decodeOut`"And" : Expr ty Bool ).
+  Local Notation                 Sl := (decodeOut`"Sl" : Expr ty Bool ).
+  Local Notation                 Sr := (decodeOut`"Sr" : Expr ty Bool ).
+  Local Notation              Store := (decodeOut`"Store" : Expr ty Bool ).
+  Local Notation               Load := (decodeOut`"Load" : Expr ty Bool ).
+  Local Notation       LoadUnsigned := (decodeOut`"LoadUnsigned" : Expr ty Bool ).
+  Local Notation          SetBounds := (decodeOut`"SetBounds" : Expr ty Bool ).
+  Local Notation     SetBoundsExact := (decodeOut`"SetBoundsExact" : Expr ty Bool ).
+  Local Notation       BoundsSubset := (decodeOut`"BoundsSubset" : Expr ty Bool ).
+  Local Notation    BoundsFixedBase := (decodeOut`"BoundsFixedBase" : Expr ty Bool ).
 
-  Local Definition               csrs: Expr ty Csrs := aluIn`"csrs".
-  Local Definition      mcycle: Expr ty (Bit DXlen) := csrs`"mcycle".
-  Local Definition       mtime: Expr ty (Bit DXlen) := csrs`"mtime".
-  Local Definition    minstret: Expr ty (Bit DXlen) := csrs`"minstret".
-  Local Definition           mshwm: Expr ty (Bit _) := csrs`"mshwm".
-  Local Definition          mshwmb: Expr ty (Bit _) := csrs`"mshwmb".
-
-  Local Definition                 ie: Expr ty Bool := csrs`"ie".
-  Local Definition          interrupt: Expr ty Bool := csrs`"interrupt".
-  Local Definition   mcause: Expr ty (Bit McauseSz) := csrs`"mcause".
-  Local Definition              mtval: Expr ty Addr := csrs`"mtval".
-
-  Local Definition               scrs: Expr ty Scrs := aluIn`"scrs".
-  Local Definition    mtcc: Expr ty FullECapWithTag := scrs`"mtcc".
-  Local Definition    mtdc: Expr ty FullECapWithTag := scrs`"mtdc".
-  Local Definition              mscratch: Expr ty _ := scrs`"mscratchc" : Expr ty FullECapWithTag.
-  Local Definition                 mepcc: Expr ty _ := scrs`"mepcc" : Expr ty FullECapWithTag.
-
-  Local Definition   interrupts: Expr ty Interrupts := aluIn`"interrupts".
-  Local Definition                mei: Expr ty Bool := interrupts`"mei".
-  Local Definition                mti: Expr ty Bool := interrupts`"mti".
-
-  Local Definition           rs1IdxFixed: Expr ty _ := aluIn`"decodeOut"`"rs1Idx" : Expr ty (Bit RegFixedIdSz).
-  Local Definition           rs2IdxFixed: Expr ty _ := aluIn`"decodeOut"`"rs2Idx" : Expr ty (Bit RegFixedIdSz).
-  Local Definition            rdIdxFixed: Expr ty _ := aluIn`"decodeOut"`"rdIdx" : Expr ty (Bit RegFixedIdSz).
-  Local Definition   decImm: Expr ty (Bit DecImmSz) := aluIn`"decodeOut"`"decImm".
-  Local Definition     memSz: Expr ty (Bit MemSzSz) := aluIn`"decodeOut"`"memSz".
-
-  Local Definition         Compressed: Expr ty Bool := aluIn`"decodeOut"`"Compressed".
-  Local Definition        ImmExtRight: Expr ty Bool := aluIn`"decodeOut"`"ImmExtRight".
-  Local Definition         ImmForData: Expr ty Bool := aluIn`"decodeOut"`"ImmForData".
-  Local Definition         ImmForAddr: Expr ty Bool := aluIn`"decodeOut"`"ImmForAddr".
-
-  Local Definition           ReadReg1: Expr ty Bool := aluIn`"decodeOut"`"ReadReg1".
-  Local Definition           ReadReg2: Expr ty Bool := aluIn`"decodeOut"`"ReadReg2".
-  Local Definition           WriteReg: Expr ty Bool := aluIn`"decodeOut"`"WriteReg".
-
-  Local Definition         MultiCycle: Expr ty Bool := aluIn`"decodeOut"`"MultiCycle".
+  Local Notation        CChangeAddr := (decodeOut`"CChangeAddr" : Expr ty Bool ).
+  Local Notation             AuiPcc := (decodeOut`"AuiPcc" : Expr ty Bool ).
+  Local Notation           CGetBase := (decodeOut`"CGetBase" : Expr ty Bool ).
+  Local Notation            CGetTop := (decodeOut`"CGetTop" : Expr ty Bool ).
+  Local Notation            CGetLen := (decodeOut`"CGetLen" : Expr ty Bool ).
+  Local Notation           CGetPerm := (decodeOut`"CGetPerm" : Expr ty Bool ).
+  Local Notation           CGetType := (decodeOut`"CGetType" : Expr ty Bool ).
+  Local Notation            CGetTag := (decodeOut`"CGetTag" : Expr ty Bool ).
+  Local Notation           CGetHigh := (decodeOut`"CGetHigh" : Expr ty Bool ).
+  Local Notation               Cram := (decodeOut`"Cram" : Expr ty Bool ).
+  Local Notation               Crrl := (decodeOut`"Crrl" : Expr ty Bool ).
+  Local Notation          CSetEqual := (decodeOut`"CSetEqual" : Expr ty Bool ).
+  Local Notation        CTestSubset := (decodeOut`"CTestSubset" : Expr ty Bool ).
+  Local Notation           CAndPerm := (decodeOut`"CAndPerm" : Expr ty Bool ).
+  Local Notation          CClearTag := (decodeOut`"CClearTag" : Expr ty Bool ).
+  Local Notation           CSetHigh := (decodeOut`"CSetHigh" : Expr ty Bool ).
+  Local Notation              CMove := (decodeOut`"CMove" : Expr ty Bool ).
+  Local Notation              CSeal := (decodeOut`"CSeal" : Expr ty Bool ).
+  Local Notation            CUnseal := (decodeOut`"CUnseal" : Expr ty Bool ).
   
-  Local Definition             Src1Pc: Expr ty Bool := aluIn`"decodeOut"`"Src1Pc".
-  Local Definition            InvSrc2: Expr ty Bool := aluIn`"decodeOut"`"InvSrc2".
-  Local Definition           Src2Zero: Expr ty Bool := aluIn`"decodeOut"`"Src2Zero".
-  Local Definition     ZeroExtendSrc1: Expr ty Bool := aluIn`"decodeOut"`"ZeroExtendSrc1".
-  Local Definition             Branch: Expr ty Bool := aluIn`"decodeOut"`"Branch".
-  Local Definition           BranchLt: Expr ty Bool := aluIn`"decodeOut"`"BranchLt".
-  Local Definition          BranchNeg: Expr ty Bool := aluIn`"decodeOut"`"BranchNeg".
-  Local Definition              SltOp: Expr ty Bool := aluIn`"decodeOut"`"Slt".
-  Local Definition              AddOp: Expr ty Bool := aluIn`"decodeOut"`"Add".
-  Local Definition              XorOp: Expr ty Bool := aluIn`"decodeOut"`"Xor".
-  Local Definition               OrOp: Expr ty Bool := aluIn`"decodeOut"`"Or".
-  Local Definition              AndOp: Expr ty Bool := aluIn`"decodeOut"`"And".
-  Local Definition                 Sl: Expr ty Bool := aluIn`"decodeOut"`"Sl".
-  Local Definition                 Sr: Expr ty Bool := aluIn`"decodeOut"`"Sr".
-  Local Definition              Store: Expr ty Bool := aluIn`"decodeOut"`"Store".
-  Local Definition               Load: Expr ty Bool := aluIn`"decodeOut"`"Load".
-  Local Definition       LoadUnsigned: Expr ty Bool := aluIn`"decodeOut"`"LoadUnsigned".
-  Local Definition          SetBounds: Expr ty Bool := aluIn`"decodeOut"`"SetBounds".
-  Local Definition     SetBoundsExact: Expr ty Bool := aluIn`"decodeOut"`"SetBoundsExact".
-  Local Definition       BoundsSubset: Expr ty Bool := aluIn`"decodeOut"`"BoundsSubset".
-  Local Definition    BoundsFixedBase: Expr ty Bool := aluIn`"decodeOut"`"BoundsFixedBase".
+  Local Notation               CJal := (decodeOut`"CJal" : Expr ty Bool ).
+  Local Notation              CJalr := (decodeOut`"CJalr" : Expr ty Bool ).
+  Local Notation             AuiAll := (decodeOut`"AuiAll" : Expr ty Bool ).
+  Local Notation                Lui := (decodeOut`"Lui" : Expr ty Bool ).
 
-  Local Definition        CChangeAddr: Expr ty Bool := aluIn`"decodeOut"`"CChangeAddr".
-  Local Definition             AuiPcc: Expr ty Bool := aluIn`"decodeOut"`"AuiPcc".
-  Local Definition           CGetBase: Expr ty Bool := aluIn`"decodeOut"`"CGetBase".
-  Local Definition            CGetTop: Expr ty Bool := aluIn`"decodeOut"`"CGetTop".
-  Local Definition            CGetLen: Expr ty Bool := aluIn`"decodeOut"`"CGetLen".
-  Local Definition           CGetPerm: Expr ty Bool := aluIn`"decodeOut"`"CGetPerm".
-  Local Definition           CGetType: Expr ty Bool := aluIn`"decodeOut"`"CGetType".
-  Local Definition            CGetTag: Expr ty Bool := aluIn`"decodeOut"`"CGetTag".
-  Local Definition           CGetHigh: Expr ty Bool := aluIn`"decodeOut"`"CGetHigh".
-  Local Definition               Cram: Expr ty Bool := aluIn`"decodeOut"`"Cram".
-  Local Definition               Crrl: Expr ty Bool := aluIn`"decodeOut"`"Crrl".
-  Local Definition          CSetEqual: Expr ty Bool := aluIn`"decodeOut"`"CSetEqual".
-  Local Definition        CTestSubset: Expr ty Bool := aluIn`"decodeOut"`"CTestSubset".
-  Local Definition           CAndPerm: Expr ty Bool := aluIn`"decodeOut"`"CAndPerm".
-  Local Definition          CClearTag: Expr ty Bool := aluIn`"decodeOut"`"CClearTag".
-  Local Definition           CSetHigh: Expr ty Bool := aluIn`"decodeOut"`"CSetHigh".
-  Local Definition              CMove: Expr ty Bool := aluIn`"decodeOut"`"CMove".
-  Local Definition              CSeal: Expr ty Bool := aluIn`"decodeOut"`"CSeal".
-  Local Definition            CUnseal: Expr ty Bool := aluIn`"decodeOut"`"CUnseal".
-  
-  Local Definition               CJal: Expr ty Bool := aluIn`"decodeOut"`"CJal".
-  Local Definition              CJalr: Expr ty Bool := aluIn`"decodeOut"`"CJalr".
-  Local Definition             AuiAll: Expr ty Bool := aluIn`"decodeOut"`"AuiAll".
-  Local Definition                Lui: Expr ty Bool := aluIn`"decodeOut"`"Lui".
+  Local Notation         CSpecialRw := (decodeOut`"CSpecialRw" : Expr ty Bool ).
+  Local Notation               MRet := (decodeOut`"MRet" : Expr ty Bool ).
+  Local Notation              ECall := (decodeOut`"ECall" : Expr ty Bool ).
+  Local Notation             EBreak := (decodeOut`"EBreak" : Expr ty Bool ).
+  Local Notation             FenceI := (decodeOut`"FenceI" : Expr ty Bool ).
+  Local Notation              Fence := (decodeOut`"Fence" : Expr ty Bool ).
+  Local Notation         NotIllegal := (decodeOut`"NotIllegal" : Expr ty Bool ).
 
-  Local Definition         CSpecialRw: Expr ty Bool := aluIn`"decodeOut"`"CSpecialRw".
-  Local Definition               MRet: Expr ty Bool := aluIn`"decodeOut"`"MRet".
-  Local Definition              ECall: Expr ty Bool := aluIn`"decodeOut"`"ECall".
-  Local Definition             EBreak: Expr ty Bool := aluIn`"decodeOut"`"EBreak".
-  Local Definition             FenceI: Expr ty Bool := aluIn`"decodeOut"`"FenceI".
-  Local Definition              Fence: Expr ty Bool := aluIn`"decodeOut"`"Fence".
-  Local Definition         NotIllegal: Expr ty Bool := aluIn`"decodeOut"`"NotIllegal".
+  Local Notation              CsrRw := (decodeOut`"CsrRw" : Expr ty Bool ).
+  Local Notation             CsrSet := (decodeOut`"CsrSet" : Expr ty Bool ).
+  Local Notation           CsrClear := (decodeOut`"CsrClear" : Expr ty Bool ).
+  Local Notation             CsrImm := (decodeOut`"CsrImm" : Expr ty Bool ).
 
-  Local Definition              CsrRw: Expr ty Bool := aluIn`"decodeOut"`"CsrRw".
-  Local Definition             CsrSet: Expr ty Bool := aluIn`"decodeOut"`"CsrSet".
-  Local Definition           CsrClear: Expr ty Bool := aluIn`"decodeOut"`"CsrClear".
-  Local Definition             CsrImm: Expr ty Bool := aluIn`"decodeOut"`"CsrImm".
+  Local Notation GetCsrIdx x := (Const _ (Bit CsrIdSz) (Zmod.of_Z _ x)).
 
-  Local Notation GetCsrIdx x := (ConstBit (ZToWord CsrIdSz x)).
-
-  Local Definition saturatedMax {n} (e: Expr ty (Bit (S n))) :=
-    ITE (FromBit Bool (TruncMsb 1 n e)) (ConstBit (wones n)) (TruncLsb 1 n e).
+  Local Definition saturatedMax {n} (e: Expr ty (Bit (n + 1))) :=
+    ITE (FromBit Bool (TruncMsb 1 n e)) (Const _ (Bit n) (Zmod.of_Z _ (-1))) (TruncLsb 1 n e).
 
   Local Definition exception (x: Expr ty (Bit CapExceptSz)) : Expr ty (Option (Bit CapExceptSz)) :=
     STRUCT { "data" ::= x ;
@@ -1390,25 +1407,77 @@ Section Alu.
   Local Definition regIdxWrong (idx: Expr ty (Bit RegFixedIdSz)) :=
     isNotZero (TruncMsb (RegFixedIdSz - RegIdSz) RegIdSz idx).
 
-  Definition alu : LetExpr ty AluOut :=
+  Ltac aluSimpl x :=
+    (let y := eval cbv [getFinStruct structList arraySize fieldK forceOption getFinStructOption length
+                          fst snd String.eqb Ascii.eqb Bool.eqb fieldNameK nth_pf finNum] in x in
+       simplKind y).
+
+  Notation aluSimpl x := ltac:(aluSimpl x) (only parsing).
+
+  Definition aluValOnly: LetExpr ty (Pair (Bit (Xlen + 1)) (Bit (Xlen + 1))) := aluSimpl
+    ( LetE rs1Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs1IdxFixed;
+      LetE rs2Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs2IdxFixed;
+      LetE fullImmXlen <- ITE ImmExtRight ({< decImm, Const _ (Bit 11) (Zmod.of_Z _ (-1)) >})
+        (SignExtendTo Xlen decImm);
+      LetE fullImmSXlen <- SignExtend 1 #fullImmXlen;
+
+      LetE reg1 : FullECapWithTag <- ITE (isNotZero #rs1Idx) (regs @[ #rs1Idx ]) ConstDef;
+      LetE cap1 : ECap <- #reg1`"ecap";
+      LetE val1 : Addr <- #reg1`"addr";
+      LetE reg2 : FullECapWithTag <- ITE (isNotZero #rs2Idx) (regs @[ #rs2Idx ]) ConstDef;
+      LetE cap2 : ECap <- #reg2`"ecap";
+      LetE val2 : Addr <- #reg2`"addr";
+
+      LetE cap1Base <- #cap1`"base";
+      LetE cap1Top <- #cap1`"top";
+
+      LetE src1 <- ITE Src1Pc pcVal #val1;
+
+      LetE src2Full <- ITE ImmForData
+                         #fullImmSXlen
+                         (SignExtend 1 (ITE0 (Not Src2Zero) #val2));
+      LetE adderSrc1 <- ITE CGetLen #cap1Top
+                          (ITE ZeroExtendSrc1 (ZeroExtend 1 #src1) (SignExtend 1 #src1));
+      LetE adderSrc2 <- ITE CGetLen #cap1Base #src2Full;
+      LetE adderSrc2Fixed <- ITE InvSrc2 (Inv #adderSrc2) #adderSrc2;
+      LetE carryExt  <- ZeroExtend Xlen (ToBit InvSrc2);
+      LetE adderResFull <- Add [#adderSrc1; #adderSrc2Fixed; #carryExt];
+      LetE adderCarryBool <- FromBit Bool (TruncMsb 1 Xlen #adderResFull);
+      LetE adderResZero <- isZero #adderResFull;
+      LetE branchTakenPos <- ITE BranchLt #adderCarryBool #adderResZero;
+      LetE branchTaken <- Xor [BranchNeg; #branchTakenPos];
+      LetE adderRes: Data <- TruncLsb 1 Xlen #adderResFull;
+      LetE src2 <- TruncLsb 1 Xlen #src2Full;
+      LetE xorRes <- Bxor [#val1; #src2];
+      LetE orRes <- Or [#val1; #src2];
+      LetE andRes <- Band [#val1; #src2];
+      LetE shiftAmt <- TruncLsb (Xlen - Z.log2_up Xlen) (Z.log2_up Xlen) #src2;
+      LetE slRes <- Sll #val1 #shiftAmt;
+      LetE srRes <- TruncLsb 1 Xlen (Sra #adderSrc1 #shiftAmt);
+
+      LetE resAddrValFullTemp <- Add [ZeroExtend 1 #src1; ITE0 ImmForAddr #fullImmSXlen];
+      LetE resAddrValFull <- {< TruncMsb Xlen 1 #resAddrValFullTemp,
+          ITE CJalr (ConstBit Zmod.zero) (TruncLsb Xlen 1 #resAddrValFullTemp) >};
+
+      @RetE _ (Pair (Bit (Xlen + 1)) (Bit (Xlen + 1))) (STRUCT { "fst" ::= #adderResFull;
+                                                                 "snd" ::= #resAddrValFull })).
+  
+  Definition aluReg: LetExpr ty FullECapWithTag := aluSimpl
     ( LetE rdIdx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rdIdxFixed;
       LetE rs1Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs1IdxFixed;
       LetE rs2Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs2IdxFixed;
-      LetE immVal: Bit Imm12Sz <- TruncLsb (DecImmSz - Imm12Sz) Imm12Sz decImm;
-      LetE fullImmXlen <- ITE ImmExtRight ({< decImm, ConstBit (wzero 11) >}) (SignExtendTo Xlen decImm);
+      LetE fullImmXlen <- ITE ImmExtRight ({< decImm, Const _ (Bit 11) (Zmod.of_Z _ (-1)) >})
+        (SignExtendTo Xlen decImm);
       LetE fullImmSXlen <- SignExtend 1 #fullImmXlen;
 
       LetE reg1 : FullECapWithTag <- ITE (isNotZero #rs1Idx) (regs @[ #rs1Idx ]) ConstDef;
       LetE tag1 : Bool <- #reg1`"tag";
       LetE cap1 : ECap <- #reg1`"ecap";
       LetE val1 : Addr <- #reg1`"addr";
-      LetE reg2 : FullECapWithTag <- ITE (isNotZero #rs1Idx) (regs @[ #rs2Idx ]) ConstDef;
+      LetE reg2 : FullECapWithTag <- ITE (isNotZero #rs2Idx) (regs @[ #rs2Idx ]) ConstDef;
       LetE tag2 : Bool <- #reg2`"tag";
       LetE cap2 : ECap <- #reg2`"ecap";
       LetE val2 : Addr <- #reg2`"addr";
-
-      LetE wait1 : Bool <- waits @[ #rs1Idx ];
-      LetE wait2 : Bool <- waits @[ #rs2Idx ];
 
       LetE cap1Base <- #cap1`"base";
       LetE cap1Top <- #cap1`"top";
@@ -1422,6 +1491,7 @@ Section Alu.
       LetE cap2NotSealed <- isNotSealed #cap2OType;
 
       LetE src1 <- ITE Src1Pc pcVal #val1;
+
       LetE src2Full <- ITE ImmForData
                          #fullImmSXlen
                          (SignExtend 1 (ITE0 (Not Src2Zero) #val2));
@@ -1431,8 +1501,8 @@ Section Alu.
       LetE adderSrc2Fixed <- ITE InvSrc2 (Inv #adderSrc2) #adderSrc2;
       LetE carryExt  <- ZeroExtend Xlen (ToBit InvSrc2);
       LetE adderResFull <- Add [#adderSrc1; #adderSrc2Fixed; #carryExt];
-      LetE adderResZero <- isZero #adderResFull;
       LetE adderCarryBool <- FromBit Bool (TruncMsb 1 Xlen #adderResFull);
+      LetE adderResZero <- isZero #adderResFull;
       LetE branchTakenPos <- ITE BranchLt #adderCarryBool #adderResZero;
       LetE branchTaken <- Xor [BranchNeg; #branchTakenPos];
       LetE adderRes: Data <- TruncLsb 1 Xlen #adderResFull;
@@ -1440,15 +1510,13 @@ Section Alu.
       LetE xorRes <- Bxor [#val1; #src2];
       LetE orRes <- Or [#val1; #src2];
       LetE andRes <- Band [#val1; #src2];
-      LetE shiftAmt <- TruncLsb (Xlen - Nat.log2_up Xlen) (Nat.log2_up Xlen) #src2;
+      LetE shiftAmt <- TruncLsb (Xlen - Z.log2_up Xlen) (Z.log2_up Xlen) #src2;
       LetE slRes <- Sll #val1 #shiftAmt;
       LetE srRes <- TruncLsb 1 Xlen (Sra #adderSrc1 #shiftAmt);
 
       LetE resAddrValFullTemp <- Add [ZeroExtend 1 #src1; ITE0 ImmForAddr #fullImmSXlen];
       LetE resAddrValFull <- {< TruncMsb Xlen 1 #resAddrValFullTemp,
-          ITE CJalr (ConstBit WO~0) (TruncLsb Xlen 1 #resAddrValFullTemp) >};
-      LetE resAddrVal <- TruncLsb 1 Xlen #resAddrValFull;
-      LetE resAddrCarryBool <- FromBit Bool (TruncMsb 1 Xlen #resAddrValFull);
+          ITE CJalr (ConstBit Zmod.zero) (TruncLsb Xlen 1 #resAddrValFullTemp) >};
 
       LetE seal_unseal <- Or [CSeal; CUnseal];
 
@@ -1461,7 +1529,7 @@ Section Alu.
 
       LetE baseCheckBase <- caseDefault [(Src1Pc, pcCap`"base"); (#seal_unseal, #cap2Base)] #cap1Base;
       LetE baseCheckAddr <- caseDefault [(CSeal, ZeroExtend 1 #val2);
-                                         (CUnseal, ZeroExtend (1 + Xlen - CapOTypeSz) #cap1OType);
+                                         (CUnseal, ZeroExtend (1 + Xlen - CapOTypeSz) ##cap1OType);
                                          (#branch_jump_load_store, #resAddrValFull);
                                          (CTestSubset, #cap2Base)]
                               #adderResFull;
@@ -1475,7 +1543,7 @@ Section Alu.
                                        (Or [#branch_jump; CChangeAddr], #representableLimit)]
                             #cap1Top;
       LetE topCheckAddr <-  caseDefault [(CSeal, ZeroExtend 1 #val2);
-                                         (CUnseal, ZeroExtend (1 + Xlen - CapOTypeSz) #cap1OType);
+                                         (CUnseal, ZeroExtend (1 + Xlen - CapOTypeSz) ##cap1OType);
                                          (#branch_jump_load_store, #resAddrValFull);
                                          (CTestSubset, #cap2Top)]
                               #adderResFull;
@@ -1538,6 +1606,225 @@ Section Alu.
            (ITE (Eq #rs1Idx $ra) (isBackwardSentry #cap1OType) #notSealedOrInheriting)
            (ITE (Eq #rdIdx $ra) (Or [#cap1NotSealed; isForwardSentry #cap1OType]) #notSealedOrInheriting));
 
+      LetE linkAddr <- Add [pcVal; if HasComp then ITE Compressed $(InstSz/8) $(CompInstSz/8) else $(InstSz/8)];
+
+      LetE saturated <- saturatedMax
+                          (Or [ITE0 CGetBase #cap1Base; ITE0 CGetTop #cap1Top; ITE0 CGetLen #adderResFull;
+                               ITE0 Crrl (##newBounds`"length") ]);
+
+      LetE resVal <- Or [ ITE0 AddOp #adderRes; ITE0 Lui #fullImmXlen;
+                          ITE0 XorOp #xorRes; ITE0 OrOp #orRes; ITE0 AndOp #andRes;
+                          ITE0 Sl #slRes; ITE0 Sr #srRes;
+                          ITE0 CGetPerm (ZeroExtendTo Xlen (ToBit #cap1Perms));
+                          ITE0 CGetType (ZeroExtendTo Xlen #cap1OType);
+                          ITE0 CGetHigh (ToBit #encodedCap);
+                          ITE0 #cjal_cjalr #linkAddr;
+                          ITE0 Cram (TruncLsb 1 Xlen (##newBounds`"cram"));
+                          #saturated;
+                          #zeroExtendBoolRes];
+
+      LetE resTag <- And [#tag1; Or [And [CAndPerm; #cAndPermTagNew];
+                                     CMove;
+                                     And [CChangeAddr; #cChangeAddrTagNew];
+                                     And [CSeal; #cSealTagNew];
+                                     ITE0 SetBounds (Or [Not SetBoundsExact; ##newBounds`"exact"]);
+                                     And [CUnseal; #cUnsealTagNew];
+                                     #cjal_cjalr ]];
+
+      LetE resCap <- Or [ ITE0 CAndPerm #cAndPermCap;
+                          ITE0 (Or [CClearTag; CMove; CChangeAddr]) (ITE Src1Pc pcCap #cap1);
+                          ITE0 CSetHigh #cSetHighCap;
+                          ITE0 SetBounds #cSetBoundsCap;
+                          ITE0 #cjal_cjalr #cJalJalrCap;
+                          ITE0 CSeal #cSealCap;
+                          ITE0 CUnseal #cUnsealCap ];
+
+      @RetE _ FullECapWithTag (STRUCT { "tag" ::= #resTag;
+                                        "ecap" ::= #resCap;
+                                        "addr" ::= #resVal })).
+  
+  Definition alu : LetExpr ty AluOut := aluSimpl (
+      LetE rdIdx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rdIdxFixed;
+      LetE rs1Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs1IdxFixed;
+      LetE rs2Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs2IdxFixed;
+      LetE immVal: Bit Imm12Sz <- TruncLsb (DecImmSz - Imm12Sz) Imm12Sz decImm;
+      LetE fullImmXlen <- ITE ImmExtRight ({< decImm, Const _ (Bit 11) (Zmod.of_Z _ (-1)) >})
+        (SignExtendTo Xlen decImm);
+      LetE fullImmSXlen <- SignExtend 1 #fullImmXlen;
+  
+      LetE reg1 : FullECapWithTag <- ITE (isNotZero #rs1Idx) (regs @[ #rs1Idx ]) ConstDef;
+      LetE tag1 : Bool <- #reg1`"tag";
+      LetE cap1 : ECap <- #reg1`"ecap";
+      LetE val1 : Addr <- #reg1`"addr";
+      LetE reg2 : FullECapWithTag <- ITE (isNotZero #rs2Idx) (regs @[ #rs2Idx ]) ConstDef;
+      LetE tag2 : Bool <- #reg2`"tag";
+      LetE cap2 : ECap <- #reg2`"ecap";
+      LetE val2 : Addr <- #reg2`"addr";
+
+      LetE wait1 : Bool <- waits @[ #rs1Idx ];
+      LetE wait2 : Bool <- waits @[ #rs2Idx ];
+
+      LetE cap1Base <- #cap1`"base";
+      LetE cap1Top <- #cap1`"top";
+      LetE cap1Perms <- #cap1`"perms";
+      LetE cap1OType <- #cap1`"oType";
+      LetE cap2Base <- #cap2`"base";
+      LetE cap2Top <- #cap2`"top";
+      LetE cap2Perms <- #cap2`"perms";
+      LetE cap2OType <- #cap2`"oType";
+      LetE cap1NotSealed <- isNotSealed #cap1OType;
+      LetE cap2NotSealed <- isNotSealed #cap2OType;
+
+      LetE src1 <- ITE Src1Pc pcVal #val1;
+
+      LetE src2Full <- ITE ImmForData
+                         #fullImmSXlen
+                         (SignExtend 1 (ITE0 (Not Src2Zero) #val2));
+      LetE adderSrc1 <- ITE CGetLen #cap1Top
+                          (ITE ZeroExtendSrc1 (ZeroExtend 1 #src1) (SignExtend 1 #src1));
+      LetE adderSrc2 <- ITE CGetLen #cap1Base #src2Full;
+      LetE adderSrc2Fixed <- ITE InvSrc2 (Inv #adderSrc2) #adderSrc2;
+      LetE carryExt  <- ZeroExtend Xlen (ToBit InvSrc2);
+      LetE adderResFull <- Add [#adderSrc1; #adderSrc2Fixed; #carryExt];
+      LetE adderResZero <- isZero #adderResFull;
+      LetE adderCarryBool <- FromBit Bool (TruncMsb 1 Xlen #adderResFull);
+      LetE branchTakenPos <- ITE BranchLt #adderCarryBool #adderResZero;
+      LetE branchTaken <- Xor [BranchNeg; #branchTakenPos];
+      LetE adderRes: Data <- TruncLsb 1 Xlen #adderResFull;
+      LetE src2 <- TruncLsb 1 Xlen #src2Full;
+      LetE xorRes <- Bxor [#val1; #src2];
+      LetE orRes <- Or [#val1; #src2];
+      LetE andRes <- Band [#val1; #src2];
+      LetE shiftAmt <- TruncLsb (Xlen - Z.log2_up Xlen) (Z.log2_up Xlen) #src2;
+      LetE slRes <- Sll #val1 #shiftAmt;
+      LetE srRes <- TruncLsb 1 Xlen (Sra #adderSrc1 #shiftAmt);
+
+      LetE resAddrValFullTemp <- Add [ZeroExtend 1 #src1; ITE0 ImmForAddr #fullImmSXlen];
+      LetE resAddrValFull <- {< TruncMsb Xlen 1 #resAddrValFullTemp,
+          ITE CJalr (ConstBit Zmod.zero) (TruncLsb Xlen 1 #resAddrValFullTemp) >};
+      LetE resAddrVal <- TruncLsb 1 Xlen #resAddrValFull;
+
+      LetE seal_unseal <- Or [CSeal; CUnseal];
+
+      LetE load_store <- Or [Load; Store];
+      LetE cjal_cjalr <- Or [CJal; CJalr];
+      LetE branch_jump <- Or [Branch; #cjal_cjalr];
+      LetE branch_jump_load_store <- Or [#branch_jump; #load_store];
+
+      LetE change_addr <- Or [#branch_jump_load_store; CChangeAddr];
+
+      LetE baseCheckBase <- caseDefault [(Src1Pc, pcCap`"base"); (#seal_unseal, #cap2Base)] #cap1Base;
+      LetE baseCheckAddr <- caseDefault [(CSeal, ZeroExtend 1 #val2);
+                                         (CUnseal, ZeroExtend (1 + Xlen - CapOTypeSz) ##cap1OType);
+                                         (#branch_jump_load_store, #resAddrValFull);
+                                         (CTestSubset, #cap2Base)]
+                              #adderResFull;
+      LetE baseCheck <- And [Sle #baseCheckBase #baseCheckAddr;
+                          Or [Not #change_addr; Not (FromBit Bool (TruncMsb 1 Xlen #baseCheckAddr))]];
+
+      LetE representableLimit <- getRepresentableLimit
+                                   (ITE Src1Pc (pcCap`"base") #cap1Base)
+                                   (get_ECorrected_from_E (ITE Src1Pc (pcCap`"E") (#cap1`"E")));
+      LetE topCheckTop <- caseDefault [(#seal_unseal, #cap2Top);
+                                       (Or [#branch_jump; CChangeAddr], #representableLimit)]
+                            #cap1Top;
+      LetE topCheckAddr <-  caseDefault [(CSeal, ZeroExtend 1 #val2);
+                                         (CUnseal, ZeroExtend (1 + Xlen - CapOTypeSz) ##cap1OType);
+                                         (#branch_jump_load_store, #resAddrValFull);
+                                         (CTestSubset, #cap2Top)]
+                              #adderResFull;
+      LetE addrPlus <- ITE #load_store (Sll $1 memSz) (ZeroExtend Xlen (ToBit (Not CTestSubset)));
+      LetE topCheckAddrFinal <- Add [#topCheckAddr; #addrPlus];
+      LetE topCheck <-
+        And [Sle #topCheckAddrFinal #topCheckTop;
+             Or [Not (Or [#change_addr; CSeal; CUnseal]);
+                 Not (FromBit Bool (TruncMsb 1 Xlen #topCheckAddrFinal));
+                 isZero (TruncLsb 1 Xlen #topCheckAddrFinal)]];
+
+      LetE boundsRes <- And [#baseCheck; #topCheck];
+      
+      LetE cTestSubset <- And [Eq #tag1 #tag2; #boundsRes;
+                               Eq (Band [ToBit #cap1Perms; ToBit #cap2Perms]) (ToBit #cap2Perms)];
+
+      LETE encodedCap <- encodeCap #cap1;
+      LetE cram_crrl <- Or [Cram; Crrl];
+      LetE boundsBase <- ZeroExtend 1 (ITE #cram_crrl $0 #val1);
+      LetE boundsLength <- ZeroExtend 1 (ITE #cram_crrl #val1 #val2);
+      LETE newBounds <- calculateBounds #boundsBase #boundsLength BoundsSubset BoundsFixedBase;
+      LetE newBoundsTop <- Add [#newBounds`"base"; ##newBounds`"length"];
+      LetE cSetEqual <- And [Eq #tag1 #tag2; Eq #cap1 #cap2; Eq #val1 #val2];
+      LetE zeroExtendBoolRes <- ZeroExtendTo Xlen (ToBit (Or [ITE0 SltOp #adderCarryBool;
+                                                              ITE0 CGetTag #tag1;
+                                                              ITE0 CSetEqual #cSetEqual;
+                                                              ITE0 CTestSubset #cTestSubset]));
+
+      LetE cAndPermMask <- TruncLsb (Xlen - size CapPerms) (size CapPerms) #val2;
+      LetE cAndPermCapPerms <- fixPerms (FromBit CapPerms (Band [ToBit #cap1Perms; #cAndPermMask]));
+      LetE cAndPermCap <- #cap1 `{ "perms" <- #cAndPermCapPerms};
+      LetE cAndPermTagNew <- Or [#cap1NotSealed;
+                                 isAllOnes (ToBit ((FromBit CapPerms (#cAndPermMask))`{ "GL" <- ConstTBool true }))];
+
+      LETE cSetHighCap <- decodeCap (FromBit Cap #val2) #val1;
+
+      LetE cChangeAddrTagNew <- And [Or [Src1Pc; #cap1NotSealed]; #boundsRes];
+
+      LetE cSealCap <- #cap1 `{ "oType" <- TruncLsb (AddrSz - CapOTypeSz) CapOTypeSz #val2};
+      LetE cSealTagNew <- And [#tag2; #cap1NotSealed; #cap2NotSealed; (#cap2Perms`"SE"); #boundsRes;
+                            isSealableAddr (##cap1Perms`"EX") #val1];
+
+      LetE cUnsealCap <- ##cap1
+        `{"oType" <- @unsealed ty }
+        `{"perms" <- #cap1Perms`{ "GL" <- And [##cap1Perms`"GL"; ##cap2Perms`"GL"] } };
+      LetE cUnsealTagNew <- And [#tag2; Not #cap1NotSealed; #cap2NotSealed; (#cap2Perms`"US"); #boundsRes];
+
+      LetE cSetBoundsCap <- ##cap1
+        `{ "E" <- ##newBounds`"E" }
+        `{ "top" <- #newBoundsTop }
+        `{ "base" <- #newBounds`"base" };
+
+      LetE cJalJalrCap <- pcCap `{ "oType" <- ITE0 (Eq #rdIdx $ra) (createBackwardSentry ie) };
+      LetE cJalrAddrCap <- #cap1 `{ "oType" <- unsealed ty};
+      LetE newIe <- Or [And [CJalr; isInterruptEnabling #cap1OType];
+                        And [ie; Not (And [CJalr; isInterruptDisabling #cap1OType])]];
+      LetE notSealedOrInheriting <- Or [#cap1NotSealed; isInterruptInheriting #cap1OType];
+      LetE cJalrSealedCond <-
+        (ITE (Eq #rdIdx $c0)
+           (ITE (Eq #rs1Idx $ra) (isBackwardSentry #cap1OType) #notSealedOrInheriting)
+           (ITE (Eq #rdIdx $ra) (Or [#cap1NotSealed; isForwardSentry #cap1OType]) #notSealedOrInheriting));
+
+      LetE linkAddr <- Add [pcVal; if HasComp then ITE Compressed $(InstSz/8) $(CompInstSz/8) else $(InstSz/8)];
+
+      LetE saturated <- saturatedMax
+                          (Or [ITE0 CGetBase #cap1Base; ITE0 CGetTop #cap1Top; ITE0 CGetLen #adderResFull;
+                               ITE0 Crrl (##newBounds`"length") ]);
+
+      LetE resVal <- Or [ ITE0 AddOp #adderRes; ITE0 Lui #fullImmXlen;
+                          ITE0 XorOp #xorRes; ITE0 OrOp #orRes; ITE0 AndOp #andRes;
+                          ITE0 Sl #slRes; ITE0 Sr #srRes;
+                          ITE0 CGetPerm (ZeroExtendTo Xlen (ToBit #cap1Perms));
+                          ITE0 CGetType (ZeroExtendTo Xlen #cap1OType);
+                          ITE0 CGetHigh (ToBit #encodedCap);
+                          ITE0 #cjal_cjalr #linkAddr;
+                          ITE0 Cram (TruncLsb 1 Xlen (##newBounds`"cram"));
+                          #saturated;
+                          #zeroExtendBoolRes];
+
+      LetE resTag <- And [#tag1; Or [And [CAndPerm; #cAndPermTagNew];
+                                     CMove;
+                                     And [CChangeAddr; #cChangeAddrTagNew];
+                                     And [CSeal; #cSealTagNew];
+                                     ITE0 SetBounds (Or [Not SetBoundsExact; ##newBounds`"exact"]);
+                                     And [CUnseal; #cUnsealTagNew];
+                                     #cjal_cjalr ]];
+
+      LetE resCap <- Or [ ITE0 CAndPerm #cAndPermCap;
+                          ITE0 (Or [CClearTag; CMove; CChangeAddr]) (ITE Src1Pc pcCap #cap1);
+                          ITE0 CSetHigh #cSetHighCap;
+                          ITE0 SetBounds #cSetBoundsCap;
+                          ITE0 #cjal_cjalr #cJalJalrCap;
+                          ITE0 CSeal #cSealCap;
+                          ITE0 CUnseal #cUnsealCap ];
+
       LetE isCsr <- Or [CsrRw; CsrSet; CsrClear];
 
       LetE validCsr <- Or [Eq #immVal (GetCsrIdx Mcycle);
@@ -1581,11 +1868,11 @@ Section Alu.
                   (ITE (Or [And [CJalr; Not (#cap1Perms`"EX")]; And [Load; Not (##cap1Perms`"LD")];
                             And [Store; Not (##cap1Perms`"SD")]])
                      (exception (Or [ ITE0 (And [CJalr; Not (##cap1Perms`"EX")])
-                                        (Const ty (Bit CapExceptSz) (natToWord _ ExViolation));
+                                        (Const ty (Bit CapExceptSz) (Zmod.of_Z _ ExViolation));
                                       ITE0 (And [Load; Not (##cap1Perms`"LD")])
-                                        (Const ty (Bit CapExceptSz) (natToWord _ LdViolation));
+                                        (Const ty (Bit CapExceptSz) (Zmod.of_Z _ LdViolation));
                                       ITE0 (And [Store; Not (##cap1Perms`"SD")])
-                                        (Const ty (Bit CapExceptSz) (natToWord _ SdViolation)) ]))
+                                        (Const ty (Bit CapExceptSz) (Zmod.of_Z _ SdViolation)) ]))
                      (ITE (And [Store; #isCapMem; Not (##cap1Perms`"MC")])
                         (exception $McSdViolation)
                         (ITE0 (And [#load_store; Not #boundsRes])
@@ -1606,53 +1893,20 @@ Section Alu.
                                                     (caseDefault [ (#clcException, $LdAlignException);
                                                                    (#cscException, $SdAlignException) ]
                                                        (ITE0 #isCapException
-                                                          (Const ty (Bit McauseSz) (natToWord _ CapException)))));
+                                                          (Const ty (Bit McauseSz) (Zmod.of_Z _ CapException)))));
 
       LetE mtvalExceptionVal: Bit Xlen <-
                                 ITE (Or [Not pcTag; BoundsException])
                                 (ZeroExtendTo Xlen
                                    (Or [ITE0 (Not pcTag)
-                                          (Const ty (Bit CapExceptSz) (natToWord _ TagViolation));
+                                          (Const ty (Bit CapExceptSz) (Zmod.of_Z _ TagViolation));
                                         ITE0 BoundsException
-                                          (Const ty (Bit CapExceptSz) (natToWord _ BoundsViolation))]))
+                                          (Const ty (Bit CapExceptSz) (Zmod.of_Z _ BoundsViolation))]))
                                   (ITE0 (Not (Or [#illegal; EBreak; ECall]))
                                      (ITE (Or [#clcException; #cscException]) #resAddrVal
                                         (ITE0 #isCapException
                                            (ZeroExtendTo Xlen ({< #capExceptionSrc, #capExceptionVal >})))));
 
-
-      LetE saturated <- saturatedMax
-                          (Or [ITE0 CGetBase #cap1Base; ITE0 CGetTop #cap1Top; ITE0 CGetLen #adderResFull;
-                               ITE0 Crrl (##newBounds`"length") ]);
-
-      LetE linkAddr <- Add [pcVal; if HasComp then ITE Compressed $(InstSz/8) $(CompInstSz/8) else $(InstSz/8)];
-
-      LetE resVal <- Or [ ITE0 AddOp #adderRes; ITE0 Lui #fullImmXlen;
-                          ITE0 XorOp #xorRes; ITE0 OrOp #orRes; ITE0 AndOp #andRes;
-                          ITE0 Sl #slRes; ITE0 Sr #srRes;
-                          ITE0 CGetPerm (ZeroExtendTo Xlen (ToBit #cap1Perms));
-                          ITE0 CGetType (ZeroExtendTo Xlen #cap1OType);
-                          ITE0 CGetHigh (ToBit #encodedCap);
-                          ITE0 #cjal_cjalr #linkAddr;
-                          ITE0 Cram (TruncLsb 1 Xlen (##newBounds`"cram"));
-                          #saturated;
-                          #zeroExtendBoolRes];
-
-      LetE resTag <- And [#tag1; Or [And [CAndPerm; #cAndPermTagNew];
-                                     CMove;
-                                     And [CChangeAddr; #cChangeAddrTagNew];
-                                     And [CSeal; #cSealTagNew];
-                                     ITE0 SetBounds (Or [Not SetBoundsExact; ##newBounds`"exact"]);
-                                     And [CUnseal; #cUnsealTagNew];
-                                     #cjal_cjalr ]];
-
-      LetE resCap <- Or [ ITE0 CAndPerm #cAndPermCap;
-                          ITE0 (Or [CClearTag; CMove; CChangeAddr]) (ITE Src1Pc pcCap #cap1);
-                          ITE0 CSetHigh #cSetHighCap;
-                          ITE0 SetBounds #cSetBoundsCap;
-                          ITE0 #cjal_cjalr #cJalJalrCap;
-                          ITE0 CSeal #cSealCap;
-                          ITE0 CUnseal #cUnsealCap ];
 
       LetE csrIn <- ITE CsrImm (ZeroExtendTo Xlen rs1IdxFixed) #val1;
 
@@ -1672,10 +1926,10 @@ Section Alu.
                            ITE0 (Eq #immVal (GetCsrIdx Mcycleh)) #mcycleMsb;
                            ITE0 (Eq #immVal (GetCsrIdx Mtimeh)) #mtimeMsb;
                            ITE0 (Eq #immVal (GetCsrIdx Minstreth)) #minstretMsb;
-                           ITE0 (Eq #immVal (GetCsrIdx Mshwm)) ({< mshwm, ConstBit (wzero MshwmAlign) >});
-                           ITE0 (Eq #immVal (GetCsrIdx Mshwmb)) ({< mshwmb, ConstBit (wzero MshwmAlign) >});
+                           ITE0 (Eq #immVal (GetCsrIdx Mshwm)) ({< mshwm, Const _ (Bit MshwmAlign) Zmod.zero >});
+                           ITE0 (Eq #immVal (GetCsrIdx Mshwmb)) ({< mshwmb, Const _ (Bit MshwmAlign) Zmod.zero >});
                            ITE0 (Eq #immVal (GetCsrIdx Mstatus))
-                             (ZeroExtendTo Xlen ({< ToBit ie, ConstBit (wzero (IeBit-1)) >}));
+                             (ZeroExtendTo Xlen ({< ToBit ie, Const _ (Bit (IeBit-1)) Zmod.zero >}));
                            ITE0 (Eq #immVal (GetCsrIdx Mcause))
                              ({< ToBit interrupt, ZeroExtendTo (Xlen - 1) mcause >});
                            ITE0 (Eq #immVal (GetCsrIdx Mtval)) mtval ];
@@ -1767,7 +2021,7 @@ Section Alu.
         `{ "tag" <- #newTag }
         `{ "ecap" <- #cap1 }
         `{ "addr" <- ({< TruncMsb (Xlen - NumLsb0BitsInstAddr) NumLsb0BitsInstAddr
-                           #val1, ConstBit (wzero NumLsb0BitsInstAddr) >}) };
+                           #val1, Const _ (Bit NumLsb0BitsInstAddr) Zmod.zero >}) };
 
       LetE newMepcc <- ITE #isException
                          (STRUCT { "tag" ::= And [pcTag; Not BoundsException];
@@ -1848,3 +2102,6 @@ Section Alu.
 End Alu.
 
 (* TODO: Pipelines (Load, LoadCap, Store, Fetch), Split binary into membanks *)
+
+(* Specific definitions (for arguments to cbn or cbv if necessary)
+*)
