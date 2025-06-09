@@ -1920,7 +1920,7 @@ Section Alu.
                                "FenceI" ::= And [FenceI; Not #isException] })).
 
 
-  Definition aluReg : LetExpr ty AluOut := aluSimpl (
+  Definition aluReg : LetExpr ty FullECapWithTag := aluSimpl (
       LetE rdIdx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rdIdxFixed;
       LetE rs1Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs1IdxFixed;
       LetE rs2Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs2IdxFixed;
