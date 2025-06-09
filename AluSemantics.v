@@ -25,6 +25,7 @@ Proof.
   reflexivity.
 Qed.
 
+Time
 Definition evalAluValOnly (aluIn: Expr type AluIn) :=
   ltac:( let x := eval cbn delta beta iota in (evalLetExpr (aluValOnly aluIn)) in
            exact x).
