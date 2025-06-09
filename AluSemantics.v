@@ -11,12 +11,10 @@ Local Set Printing Depth 1000.
 
 Local Open Scope Z_scope.
 
-Time
 Definition evalCalculateBounds (base length: Expr type (Bit (AddrSz + 1))) (IsSubset IsFixedBase: Expr type Bool)
   : type Bounds :=
   Eval cbn beta delta iota in (evalLetExpr (calculateBounds base length IsSubset IsFixedBase)).
 
-Time
 Definition evalDecode (inst: Expr type Inst): type DecodeOut :=
   Eval cbn delta beta iota in (evalLetExpr (decode inst)).
 
@@ -27,11 +25,11 @@ Proof.
   reflexivity.
 Qed.
 
-(*
-Time
 Definition evalAluValOnly (aluIn: Expr type AluIn) :=
   ltac:( let x := eval cbn delta beta iota in (evalLetExpr (aluValOnly aluIn)) in
            exact x).
+(*
+Time
   ltac:(let x := eval cbn delta beta iota in (evalLetExpr (aluValOnly1 aluIn)) in
           let x := eval cbv [getFinStruct getFinStructOption forceOption] in x in
             exact x).
