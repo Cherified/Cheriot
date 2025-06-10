@@ -1,6 +1,5 @@
-From Stdlib Require Import String List.
-Require Import Guru.Lib.Library Guru.Lib.Word.
-Require Import Guru.Syntax Guru.Notations Guru.Semantics.
+From Stdlib Require Import String List ZArith Zmod.
+Require Import Guru.Syntax Guru.Notations Guru.Semantics Guru.Library.
 Require Import Cheriot.Alu Cheriot.Switcher.
 
 Set Implicit Arguments.

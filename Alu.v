@@ -427,12 +427,12 @@ Section Cap.
         LetE e: Bit ExpSz <- ITE #fixedBase_eBase_lt_eLength #eBase #eLength;
         LetE mask_e : Bit (AddrSz + 2 - CapBSz) <- Not (Sll (ConstBit (Zmod.of_Z _ (-1))) #e);
         LetE base_mod_e : Bit (AddrSz + 2 - CapBSz) <-
-                            Band [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) base; #mask_e];
+                            And [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) base; #mask_e];
         LetE length_mod_e : Bit (AddrSz + 2 - CapBSz) <-
-                              Band [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) length; #mask_e];
+                              And [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) length; #mask_e];
         LetE sum_mod_e : Bit (AddrSz + 2 - CapBSz) <- Add [#base_mod_e; #length_mod_e];
         LetE iFloor : Bit 2 <- TruncLsb (AddrSz - CapBSz) 2 (Srl #sum_mod_e #e);
-        LetE lost_sum : Bool <- isNotZero (Band [#sum_mod_e; #mask_e]);
+        LetE lost_sum : Bool <- isNotZero (And [#sum_mod_e; #mask_e]);
         LetE iCeil : Bit 2 <- Add [#iFloor; ZeroExtendTo 2 (ToBit #lost_sum)];
         LetE d : Bit (CapBSz + 2) <- TruncLsb (AddrSz - 1 - CapBSz) (CapBSz + 2) (Srl length #e);
         LetE m : Bit (CapBSz + 2) <- Add [ITE #fixedBase_eBase_lt_eLength $(Z.shiftl 1 CapMSz - 1) #d;
@@ -445,8 +445,8 @@ Section Cap.
         LetE ef: Bit ExpSz <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
         LetE cram : Bit (AddrSz + 1) <- Sll (ConstBit (Zmod.of_Z _ (-1))) #ef;
         LetE mask_ef : Bit (AddrSz + 1) <- Not #cram;
-        LetE lost_base : Bool <- isNotZero (Band [base; #mask_ef]);
-        LetE outBase : Bit (AddrSz + 1) <-  Band [base; #cram];
+        LetE lost_base : Bool <- isNotZero (And [base; #mask_ef]);
+        LetE outBase : Bit (AddrSz + 1) <-  And [base; #cram];
         (* TODO for subset without fixed base.
            + (ZeroExtend Xlen (pack (IsSubset && #lost_base &&
            !(#isESaturated && ((base .& #cram) == #cram))))) << #ef *)
@@ -1467,9 +1467,9 @@ Section Alu.
       LetE branchTaken <- Xor [BranchNeg; #branchTakenPos];
       LetE adderRes: Data <- TruncLsb 1 Xlen #adderResFull;
       LetE src2 <- TruncLsb 1 Xlen #src2Full;
-      LetE xorRes <- Bxor [#val1; #src2];
+      LetE xorRes <- Xor [#val1; #src2];
       LetE orRes <- Or [#val1; #src2];
-      LetE andRes <- Band [#val1; #src2];
+      LetE andRes <- And [#val1; #src2];
       LetE shiftAmt <- TruncLsb (Xlen - Z.log2_up Xlen) (Z.log2_up Xlen) #src2;
       LetE slRes <- Sll #val1 #shiftAmt;
       LetE srRes <- TruncLsb 1 Xlen (Sra #adderSrc1 #shiftAmt);
@@ -1519,7 +1519,7 @@ Section Alu.
       LetE boundsRes <- And [#baseCheck; #topCheck];
 
       LetE cTestSubset <- And [Eq #tag1 #tag2; #boundsRes;
-                               Eq (Band [ToBit #cap1Perms; ToBit #cap2Perms]) (ToBit #cap2Perms)];
+                               Eq (And [#cap1Perms; #cap2Perms]) #cap2Perms];
 
       LETE encodedCap <- encodeCap #cap1;
 
@@ -1535,11 +1535,11 @@ Section Alu.
                                                               ITE0 CTestSubset #cTestSubset]));
 
       LetE cAndPermMask <- TruncLsb (Xlen - size CapPerms) (size CapPerms) #val2;
-      LETE cAndPermCapPerms <- fixPerms (FromBit CapPerms (Band [ToBit #cap1Perms; #cAndPermMask]));
       LetE cAndPermMaskCap <- FromBit CapPerms #cAndPermMask;
+      LETE cAndPermCapPerms <- fixPerms (And [#cap1Perms; #cAndPermMaskCap]);
       LetE cAndPermCap <- #cap1 `{ "perms" <- #cAndPermCapPerms};
       LetE cAndPermTagNew <- Or [#cap1NotSealed;
-                                 isAllOnes (ToBit (#cAndPermMaskCap`{ "GL" <- ConstTBool true }))];
+                                 isAllOnes (#cAndPermMaskCap`{ "GL" <- ConstTBool true })];
 
       LetE val2AsCap: Cap <- FromBit Cap #val2;
       LETE cSetHighCap <- decodeCap #val2AsCap #val1;
@@ -1714,7 +1714,7 @@ Section Alu.
 
       LetE csrOut <- Or [ ITE0 CsrRw #csrIn;
                           ITE0 CsrSet (Or [#csrCurr; #csrIn]);
-                          ITE0 CsrClear (Band [#csrCurr; Not #csrIn]) ];
+                          ITE0 CsrClear (And [#csrCurr; Not #csrIn]) ];
 
       LetE newMcycle: Bit DXlen <- ({< ITE (And [Not #isException; #isCsr; Eq #immVal (GetCsrIdx Mcycleh)])
                                          #csrOut
@@ -1820,7 +1820,7 @@ Section Alu.
 
       LetE stall : Bool <- Or [ And [ReadReg1; #wait1];
                                 And [ReadReg2; #wait2];
-                                And [#isException; isNotZero (ToBit waits)]] ;
+                                And [#isException; isNotZero waits]] ;
 
       LetE pcNotLinkAddrTagVal : Bool <- Or [#isException; MRet; And [Branch; #branchTaken]; CJal; CJalr];
       LetE pcNotLinkAddrCap : Bool <- Or [#isException; MRet; CJalr];
@@ -1893,6 +1893,7 @@ Definition evalAlu (pcTag: Expr type Bool) (pcCap: Expr type ECap) (aluIn: Expr 
              let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
                exact x).
 
+Time
 Definition evalDecode (inst: Expr type Inst): type DecodeOut :=
   Eval cbn delta beta iota in (evalLetExpr (decode inst)).
 
