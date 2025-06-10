@@ -414,7 +414,7 @@ Section Cap.
       ( LetE lenTrunc : Bit (AddrSz + 1 - CapBSz) <- TruncMsb (AddrSz + 1 - CapBSz) CapBSz length;
         LetE eInit: Bit ExpSz <-
                       Add [$(AddrSz + 1 - CapBSz);
-                           Inv (countLeadingZerosArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) _)];
+                           Not (countLeadingZerosArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) _)];
         LetE e_lgCeilAdd1: Bool <-
                              Or [isNotZero (TruncLsb (AddrSz + 1 - CapBSz) CapBSz length);
                                  (Neq (countOnesArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) ExpSz) $1)];
@@ -425,7 +425,7 @@ Section Cap.
         LetE eBase : Bit ExpSz <- TruncLsb 1 ExpSz (ITE (Sge #eBaseUncorrected $Emax) $Emax #eBaseUncorrected);
         LetE fixedBase_eBase_lt_eLength : Bool <- And [IsFixedBase; Slt #eBase #eLength];
         LetE e: Bit ExpSz <- ITE #fixedBase_eBase_lt_eLength #eBase #eLength;
-        LetE mask_e : Bit (AddrSz + 2 - CapBSz) <- Inv (Sll (ConstBit (Zmod.of_Z _ (-1))) #e);
+        LetE mask_e : Bit (AddrSz + 2 - CapBSz) <- Not (Sll (ConstBit (Zmod.of_Z _ (-1))) #e);
         LetE base_mod_e : Bit (AddrSz + 2 - CapBSz) <-
                             Band [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) base; #mask_e];
         LetE length_mod_e : Bit (AddrSz + 2 - CapBSz) <-
@@ -444,7 +444,7 @@ Section Cap.
         LetE isESaturated: Bool <- Sgt #efUnsat $(AddrSz + 1 - CapBSz);
         LetE ef: Bit ExpSz <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
         LetE cram : Bit (AddrSz + 1) <- Sll (ConstBit (Zmod.of_Z _ (-1))) #ef;
-        LetE mask_ef : Bit (AddrSz + 1) <- Inv #cram;
+        LetE mask_ef : Bit (AddrSz + 1) <- Not #cram;
         LetE lost_base : Bool <- isNotZero (Band [base; #mask_ef]);
         LetE outBase : Bit (AddrSz + 1) <-  Band [base; #cram];
         (* TODO for subset without fixed base.
@@ -1458,7 +1458,7 @@ Section Alu.
       LetE adderSrc1 <- ITE CGetLen #cap1Top
                           (ITE ZeroExtendSrc1 (ZeroExtend 1 #src1) (SignExtend 1 #src1));
       LetE adderSrc2 <- ITE CGetLen #cap1Base #src2Full;
-      LetE adderSrc2Fixed <- ITE InvSrc2 (Inv #adderSrc2) #adderSrc2;
+      LetE adderSrc2Fixed <- ITE InvSrc2 (Not #adderSrc2) #adderSrc2;
       LetE carryExt  <- ZeroExtend Xlen (ToBit InvSrc2);
       LetE adderResFull <- Add [#adderSrc1; #adderSrc2Fixed; #carryExt];
       LetE adderResZero <- isZero #adderResFull;
@@ -1714,7 +1714,7 @@ Section Alu.
 
       LetE csrOut <- Or [ ITE0 CsrRw #csrIn;
                           ITE0 CsrSet (Or [#csrCurr; #csrIn]);
-                          ITE0 CsrClear (Band [#csrCurr; Inv #csrIn]) ];
+                          ITE0 CsrClear (Band [#csrCurr; Not #csrIn]) ];
 
       LetE newMcycle: Bit DXlen <- ({< ITE (And [Not #isException; #isCsr; Eq #immVal (GetCsrIdx Mcycleh)])
                                          #csrOut
