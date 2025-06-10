@@ -1,6 +1,5 @@
 From Stdlib Require Import String List PeanoNat.
-Require Import Guru.Lib.Word Guru.Lib.Library.
-Require Import Guru.Syntax Guru.Notations Guru.Compiler Guru.Extraction.
+Require Import Guru.Library Guru.Syntax Guru.Notations Guru.Compiler Guru.Extraction.
 
 Import ListNotations.
 
@@ -8,6 +7,7 @@ Set Implicit Arguments.
 Unset Strict Implicit.
 Set Asymmetric Patterns.
 
+(*
 Definition Xlen := 32.
 Definition Addr := Bit Xlen.
 
@@ -241,3 +241,4 @@ Definition clut: Mod := {|modDecl := clutIfc;
 Definition compiledMod := compile clut.
 
 Extraction "Compile" size genFinStruct genFinArray compiledMod.
+*)

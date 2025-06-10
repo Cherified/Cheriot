@@ -1,6 +1,5 @@
 From Stdlib Require Import String List.
-Require Import Guru.Lib.Library Guru.Lib.Word.
-Require Import Guru.Syntax Guru.Notations.
+Require Import Guru.Library Guru.Syntax Guru.Notations.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
@@ -8,6 +7,7 @@ Set Asymmetric Patterns.
 
 Import ListNotations.
 
+(*
 Section BankedMem.
   Variable LgNum8Banks: nat.
   Variable LgEachSize: nat.
@@ -225,3 +225,4 @@ Section BankedMem.
              Return #dummy))).
   End Ty.
 End BankedMem.
+*)

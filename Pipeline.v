@@ -1,6 +1,5 @@
 From Stdlib Require Import String List.
-Require Import Guru.Lib.Library Guru.Lib.Word.
-Require Import Guru.Syntax Guru.Notations.
+Require Import Guru.Library Guru.Syntax Guru.Notations.
 Require Import Cheriot.Alu Cheriot.BankedMem Cheriot.Spec.
 
 Set Implicit Arguments.
