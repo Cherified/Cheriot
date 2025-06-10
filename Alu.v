@@ -1888,7 +1888,8 @@ Require Import Guru.Semantics.
 Time
 Definition evalAlu (pcTag: Expr type Bool) (pcCap: Expr type ECap) (aluIn: Expr type AluIn): type AluOut :=
   ltac:( let x := eval cbn delta -[evalFromBitStruct] beta iota in (evalLetExpr (alu pcTag pcCap aluIn)) in
-           let x := eval cbv delta [mapSameTuple updSameTuple] beta iota in x in
+           let x := eval cbv delta [mapSameTuple updSameTuple updSameTupleNat Bool.transparent_Is_true]
+                      beta iota in x in
              let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
                exact x).
 
