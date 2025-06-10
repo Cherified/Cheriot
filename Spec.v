@@ -183,16 +183,13 @@ Section Spec.
 
   Set Printing Depth 1000.
 
+  Time
   Definition evalStepExpr (state: Expr type AllSpecState): type AllSpecState :=
     ltac:( let x := eval cbn delta -[evalFromBitStruct] beta iota in (evalLetExpr (stepExpr state)) in
              let x := eval cbv delta [mapSameTuple updSameTuple updSameTupleNat Bool.transparent_Is_true]
                         beta iota in x in
                let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
                  exact x).
-
-
-
-  Definition step1 (e: type AllSpecState) := evalLetExpr (stepExpr #e).
 
   Definition spec: Mod := {|modDecl := specDecl;
                             modActions := fun ty => [step ty; async ty]|}.
@@ -202,19 +199,19 @@ Section Spec.
 
   Definition SpecInvariant (s: ModStateModDecl specDecl) : Prop :=
     RegsInvariant (stateRegs s) /\
-      (forall i, stateMems s i = match i with end) /\
-      (forall i, stateRegUs s i = match i with end) /\
-      (forall i, stateMemUs s i = match i with end).
+      (stateMems s = tt) /\
+      (stateRegUs s = tt) /\
+      (stateMemUs s = tt).
 
   Theorem specInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
-      SemAction (step type) old new puts gets WO ->
+      SemAction (step type) old new puts gets Zmod.zero ->
       SpecInvariant new.
   Admitted.
 
   Theorem asyncInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
-      SemAction (async type) old new puts gets WO ->
+      SemAction (async type) old new puts gets Zmod.zero ->
       SpecInvariant new.
   Admitted.
 End Spec.
