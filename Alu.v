@@ -1,5 +1,5 @@
 From Stdlib Require Import String List Zmod ZArith.
-Require Import Guru.Library Guru.Syntax Guru.Notations.
+Require Import Guru.Library Guru.Syntax Guru.Semantics Guru.Notations.
 
 Import ListNotations.
 
@@ -151,7 +151,7 @@ Section Fields.
   Definition auiLuiField := (12, Imm20Sz).
 
   Notation extractFieldFromInst span :=
-    ltac:(doSimpl
+    ltac:(structSimplCbn
             ((ConstExtract (InstSz - (snd span) - (fst span)) (snd span) (fst span) inst): Expr ty (Bit (snd span))))
            (only parsing).
 
@@ -171,12 +171,12 @@ Section Fields.
   Definition sp := 2.
 
   Definition imm := extractFieldFromInst immField.
-  Definition branchOffset := doSimpl
+  Definition branchOffset := structSimplCbn
                                ({< extractFieldFromInst (31, 1),
                                    extractFieldFromInst ( 7, 1),
                                    extractFieldFromInst (25, 6),
                                    extractFieldFromInst ( 8, 4), Const ty (Bit 1) Zmod.zero >}).
-  Definition jalOffset := doSimpl
+  Definition jalOffset := structSimplCbn
                             ({< extractFieldFromInst (31,  1),
                                 extractFieldFromInst (12,  8),
                                 extractFieldFromInst (20,  1),
@@ -190,7 +190,7 @@ Section Cap.
   Variable ty: Kind -> Type.
 
   Section CapPerms.
-    Definition decodePerms (rawPerms: Expr ty (Array CapPermSz Bool)) : LetExpr ty CapPerms := doSimpl
+    Definition decodePerms (rawPerms: Expr ty (Array CapPermSz Bool)) : LetExpr ty CapPerms := structSimplCbn
       ( LetE initPerms : CapPerms <- (ConstTDefK CapPerms) `{ "GL" <- rawPerms $[5] };
         RetE (ITE (rawPerms $[4])
                 (ITE (rawPerms $[3])
@@ -227,7 +227,7 @@ Section Cap.
                       `{ "SE" <- rawPerms $[1] }
                       `{ "US" <- rawPerms $[0] })))).
 
-    Definition fixPerms (inPerms: Expr ty CapPerms) : LetExpr ty CapPerms := doSimpl
+    Definition fixPerms (inPerms: Expr ty CapPerms) : LetExpr ty CapPerms := structSimplCbn
       ( LetE perms : CapPerms <- inPerms;
         RetE (ITE (And [#perms`"EX"; ##perms`"LD"; ##perms`"MC"])
                 (##perms
@@ -284,7 +284,7 @@ Section Cap.
                             `{ "SD" <- ConstTBool false }
                             `{ "LG" <- ConstTBool false }))))))).
  
-    Definition encodePerms (inPerms: Expr ty CapPerms) : LetExpr ty (Array CapPermSz Bool) := doSimpl
+    Definition encodePerms (inPerms: Expr ty CapPerms) : LetExpr ty (Array CapPermSz Bool) := structSimplCbn
       ( LetE perms : CapPerms <- inPerms;
         @RetE _ (Array CapPermSz Bool)
           (ITE (And [##perms`"EX"; ##perms`"LD"; ##perms`"MC"])
@@ -320,14 +320,14 @@ Section Cap.
     Section testAddr.
       Variable isExec: Expr ty Bool.
       Variable addr: Expr ty Addr.
-      Definition isSealableAddr := doSimpl (
+      Definition isSealableAddr := structSimplCbn (
         And [isZero (TruncMsb (AddrSz - CapOTypeSz) CapOTypeSz addr);
              Neq (TruncMsb 1 (CapOTypeSz - 1) (TruncLsb (AddrSz - CapOTypeSz) CapOTypeSz addr)) (ToBit isExec)]).
     End testAddr.
 
-    Definition createBackwardSentry (ie: Expr ty Bool) : Expr ty (Bit CapOTypeSz) := doSimpl
+    Definition createBackwardSentry (ie: Expr ty Bool) : Expr ty (Bit CapOTypeSz) := structSimplCbn
       {< Const _ (Bit 2) (Zmod.of_Z _ 2), ToBit ie >}.
-    Definition createForwardSentry (change ie: Expr ty Bool): Expr ty (Bit CapOTypeSz) := doSimpl
+    Definition createForwardSentry (change ie: Expr ty Bool): Expr ty (Bit CapOTypeSz) := structSimplCbn
       {< Const _ (Bit 1) Zmod.zero, ToBit change, ToBit ie >}.
   End Sealed.
 
@@ -335,7 +335,7 @@ Section Cap.
     Definition get_E_from_cE (cE: Expr ty (Bit ExpSz)) : Expr ty (Bit ExpSz) := ITE (isAllOnes cE) $0 cE.
     Definition get_Mmsb_from_cE (cE: Expr ty (Bit ExpSz)) : Expr ty (Bit 1) := ToBit (isNotZero cE).
     Definition get_M_from_cE_cM (cE: Expr ty (Bit ExpSz)) (cM: Expr ty (Bit CapcMSz)) : Expr ty (Bit CapMSz) :=
-      doSimpl ({< get_Mmsb_from_cE cE, cM >}).
+      structSimplCbn ({< get_Mmsb_from_cE cE, cM >}).
 
     Definition get_Mmsb_from_M (M: Expr ty (Bit CapMSz)) := TruncMsb 1 CapcMSz M.
     Definition get_cM_from_M (M: Expr ty (Bit CapMSz)) := TruncLsb 1 CapcMSz M.
@@ -351,7 +351,7 @@ Section Cap.
     Variable base: Expr ty (Bit (AddrSz + 1)).
     Variable ECorrected: Expr ty (Bit ExpSz).
 
-    Definition getRepresentableLimit := doSimpl (
+    Definition getRepresentableLimit := structSimplCbn (
       Add [base; {< (Sll (Const _ (Bit (AddrSz + 1 - CapMSz)) Zmod.one) ECorrected),
             Const _ (Bit CapMSz) Zmod.zero >}]).
   End Representable.
@@ -367,7 +367,7 @@ Section Cap.
     Variable M: Expr ty (Bit CapMSz).
     Variable B: Expr ty (Bit CapBSz).
 
-    Definition get_base_length_from_ECorrected_M_B : LetExpr ty BaseLength := doSimpl
+    Definition get_base_length_from_ECorrected_M_B : LetExpr ty BaseLength := structSimplCbn
       ( LetE aMidTop: Addr <- Srl addr ECorrected;
         LetE aMid: Bit CapBSz <- TruncLsb (AddrSz - CapBSz) CapBSz #aMidTop;
         LetE aTop: Bit (AddrSz - CapBSz) <- TruncMsb (AddrSz - CapBSz) CapBSz #aMidTop;
@@ -410,7 +410,7 @@ Section Cap.
           "exact" :: Bool }.
 
     (* TODO check when length = 2^32-1 and base = 2^32-1 *)
-    Definition calculateBounds : LetExpr ty Bounds := doSimpl
+    Definition calculateBounds : LetExpr ty Bounds := structSimplCbn
       ( LetE lenTrunc : Bit (AddrSz + 1 - CapBSz) <- TruncMsb (AddrSz + 1 - CapBSz) CapBSz length;
         LetE eInit: Bit ExpSz <-
                       Add [$(AddrSz + 1 - CapBSz);
@@ -462,7 +462,7 @@ Section Cap.
   Section EncodeCap.
     Variable ecap: Expr ty ECap.
 
-    Definition encodeCap: LetExpr ty Cap := doSimpl
+    Definition encodeCap: LetExpr ty Cap := structSimplCbn
       ( LETE perms <- encodePerms (ecap`"perms");
         LetE E <- ecap`"E";
         LetE ECorrected <- get_ECorrected_from_E #E;
@@ -482,7 +482,7 @@ Section Cap.
     Variable cap: Expr ty Cap.
     Variable addr: Expr ty Addr.
 
-    Definition decodeCap: LetExpr ty ECap := doSimpl
+    Definition decodeCap: LetExpr ty ECap := structSimplCbn
       ( LETE perms <- decodePerms (cap`"p");
         LetE E <- get_E_from_cE (cap`"cE");
         LetE ECorrected <- get_ECorrected_from_E #E;
@@ -644,7 +644,7 @@ Section Decode.
 
   Variable inst: Expr ty Inst.
 
-  Definition decodeFullInst: LetExpr ty DecodeOut := doSimpl
+  Definition decodeFullInst: LetExpr ty DecodeOut := structSimplCbn
     ( LetE op: Bit 5 <- opcode inst;
       LetE f3: Bit 3 <- funct3 inst;
       LetE f7: Bit 7 <- funct7 inst;
@@ -914,7 +914,7 @@ Section Decode.
                 "CsrClear" ::= #CsrClear ;
                   "CsrImm" ::= #CsrImm })).
 
-  Definition decodeCompQ0: LetExpr ty DecodeOut := doSimpl
+  Definition decodeCompQ0: LetExpr ty DecodeOut := structSimplCbn
     ( LetE rdIdx: Bit RegFixedIdSz <- ZeroExtendTo RegFixedIdSz (inst`[4:2]);
       LetE rs2Idx: Bit RegFixedIdSz <- ZeroExtendTo RegFixedIdSz (inst`[4:2]);
       LetE f3: Bit 3 <- inst`[15:13];
@@ -1012,7 +1012,7 @@ Section Decode.
                 "CsrClear" ::= ConstTBool false ;
                   "CsrImm" ::= ConstTBool false })).
 
-  Definition decodeCompQ1: LetExpr ty DecodeOut := doSimpl
+  Definition decodeCompQ1: LetExpr ty DecodeOut := structSimplCbn
     ( LetE f3: Bit 3 <- inst`[15:13];
       LetE rs1Idx: Bit RegFixedIdSz <- ITE (FromBit Bool (#f3`[2:2]))
                                          (ZeroExtendTo RegFixedIdSz (inst`[9:7]))
@@ -1152,7 +1152,7 @@ Section Decode.
                 "CsrClear" ::= ConstTBool false ;
                   "CsrImm" ::= ConstTBool false })).
 
-  Definition decodeCompQ2: LetExpr ty DecodeOut := doSimpl
+  Definition decodeCompQ2: LetExpr ty DecodeOut := structSimplCbn
     ( LetE f3: Bit 3 <- inst`[15:13];
 
       LetE rs2Idx: Bit RegFixedIdSz <- inst`[6:2];
@@ -1266,7 +1266,7 @@ Section Decode.
                            "CsrImm" ::= ConstTBool false };
       RetE #res).
 
-  Definition decode : LetExpr ty DecodeOut := doSimpl
+  Definition decode : LetExpr ty DecodeOut := structSimplCbn
     ( LETE compQ0: DecodeOut <- decodeCompQ0;
       LETE compQ1: DecodeOut <- decodeCompQ1;
       LETE compQ2: DecodeOut <- decodeCompQ2;
@@ -1411,14 +1411,7 @@ Section Alu.
   Local Definition regIdxWrong (idx: Expr ty (Bit RegFixedIdSz)) :=
     isNotZero (TruncMsb (RegFixedIdSz - RegIdSz) RegIdSz idx).
 
-  Ltac aluSimpl x :=
-    (let y := eval cbv [getFinStruct structList arraySize fieldK forceOption getFinStructOption length
-                          fst snd String.eqb Ascii.eqb Bool.eqb fieldNameK nth_pf finNum] in x in
-       simplKind y).
-
-  Notation aluSimpl x := ltac:(aluSimpl x) (only parsing).
-
-  Definition alu : LetExpr ty AluOut := aluSimpl (
+  Definition alu : LetExpr ty AluOut := structSimplCbv (
       LetE rdIdx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rdIdxFixed;
       LetE rs1Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs1IdxFixed;
       LetE rs2Idx: Bit RegIdSz <- TruncLsb (RegFixedIdSz - RegIdSz) RegIdSz rs2IdxFixed;
@@ -1883,24 +1876,17 @@ End Alu.
 
 Local Set Printing Depth 1000.
 
-Require Import Guru.Semantics.
-
 Time
-Definition evalAlu (pcTag: Expr type Bool) (pcCap: Expr type ECap) (aluIn: Expr type AluIn): type AluOut :=
-  ltac:( let x := eval cbn delta -[evalFromBitStruct] beta iota in (evalLetExpr (alu pcTag pcCap aluIn)) in
-           let x := eval cbv delta [mapSameTuple updSameTuple updSameTupleNat Bool.transparent_Is_true]
-                      beta iota in x in
-             let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
-               exact x).
+Definition evalAluSimpl (pcTag: Expr type Bool) (pcCap: Expr type ECap) (aluIn: Expr type AluIn): type AluOut :=
+  evalSimpl (evalLetExpr (alu pcTag pcCap aluIn)).
 
 Time
 Definition evalDecode (inst: Expr type Inst): type DecodeOut :=
   Eval cbn delta beta iota in (evalLetExpr (decode inst)).
 
-Theorem evalDecodeRewrite (inst: Expr type Inst): evalDecode inst = evalLetExpr (decode inst).
+Theorem evalDecodeRewrite (inst: Expr type Inst): evalLetExpr (decode inst) = evalDecode inst.
 Proof.
-  unfold evalDecode.
-  cbn delta beta iota.
+  Time cbn delta beta iota.
   reflexivity.
 Qed.
 
