@@ -174,14 +174,15 @@ Section Clut.
   Section PerChannel.
     Variable channelIdA: FinType NumChannels.
     Definition channelIdS: FinStruct (msends cl) :=
-      inr (FinArray_to_FinStruct channelIdA (repeat_length ("dmaCanAccess", Bool) NumChannels)).
-
+      Build_FinType (n := S NumChannels) (S channelIdA.(finNum)) channelIdA.(finLt).
+      
     Theorem Bool_channelIdS: Bool = fieldK (ls := msends cl) channelIdS.
     Proof.
       unfold NumChannels, channelIdS in *.
-      simpl.
-      destruct channelIdA; auto.
-      repeat (destruct f; auto).
+      destruct channelIdA;
+        simpl; auto.
+      do 4 (destruct finNum; auto).
+      destruct finNum; contradiction.
     Qed.
 
     (* DMA checks if it can access a particular pseudo-address *)
@@ -235,10 +236,9 @@ Section Clut.
 End Clut.
 Definition clut: Mod := {|modDecl := clutIfc;
                           modActions := fun ty => commandFromProc ty :: configFromProc ty ::
-                                                    map (dmaCheckAccess ty) (genFinArray NumChannels) ++
-                                                    map (finishRead ty) (genFinArray NumChannels) |}.
+                                                    map (dmaCheckAccess ty) (genFinType NumChannels) ++
+                                                    map (finishRead ty) (genFinType NumChannels) |}.
 
 Definition compiledMod := compile clut.
 
-Extraction "Compile" size genFinStruct genFinArray compiledMod.
-*)
+Extraction "Compile" size genFinType compiledMod.
