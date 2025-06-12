@@ -1,4 +1,4 @@
-From Stdlib Require Import String List.
+From Stdlib Require Import String List ZArith Zmod.
 Require Import Guru.Library Guru.Syntax Guru.Notations.
 Require Import Cheriot.Alu Cheriot.BankedMem Cheriot.Spec.
 
@@ -61,9 +61,9 @@ Section Pipeline.
            "R" ::= false ;
            "perms" ::= perms ;
            "oType" ::= Default (Bit _) ;
-           "E" ::= natToWord _ Emax ;
-           "top" ::= wconcat WO~1 (wzero AddrSz) ;
-           "base" ::= wzero (AddrSz + 1) }).
+           "E" ::= Zmod.of_Z _ Emax ;
+           "top" ::= Zmod.app (Zmod.zero: bits AddrSz) Zmod.one ;
+           "base" ::= Zmod.zero }).
 
     Definition createRoot: type FullECapWithTag :=
       (STRUCT_CONST {

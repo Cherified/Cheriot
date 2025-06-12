@@ -1,5 +1,5 @@
 From Stdlib Require Import String List Zmod ZArith.
-Require Import Guru.Library Guru.Syntax Guru.Semantics Guru.Notations.
+Require Import Guru.Library Guru.Syntax Guru.Notations.
 
 Import ListNotations.
 
@@ -1874,6 +1874,8 @@ End Alu.
 
 (* TODO: Pipelines (Load, LoadCap, Store, Fetch), Split binary into membanks *)
 
+(*
+Require Import Guru.Semantics.
 Local Set Printing Depth 1000.
 
 Time
@@ -1889,6 +1891,4 @@ Proof.
   Time cbn delta beta iota.
   reflexivity.
 Qed.
-
-(* Specific definitions (for arguments to cbn or cbv if necessary)
 *)

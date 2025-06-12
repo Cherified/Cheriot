@@ -1,4 +1,4 @@
-From Stdlib Require Import String List.
+From Stdlib Require Import String List ZArith.
 Require Import Guru.Library Guru.Syntax Guru.Notations.
 
 Set Implicit Arguments.
@@ -7,7 +7,6 @@ Set Asymmetric Patterns.
 
 Import ListNotations.
 
-(*
 Section ExprToRegAction.
   Variable ty: Kind -> Type.
   Variable k: Kind.
@@ -59,7 +58,7 @@ Section Fifo.
 
   Definition FifoState := STRUCT_TYPE {
                               "elems" :: Array capacity k;
-                              "size" :: Bit (Nat.log2_up capacity) }.
+                              "size" :: Bit (Z.log2_up (Z.of_nat capacity)) }.
 
   Section Ty.
     Variable ty: Kind -> Type.
@@ -67,7 +66,7 @@ Section Fifo.
     Section Expr.
       Variable state: Expr ty FifoState.
 
-      Definition isFullExpr : Expr ty Bool := Eq state`"size" $capacity.
+      Definition isFullExpr : Expr ty Bool := Eq state`"size" $(Z.of_nat capacity).
       Definition isEmptyExpr : Expr ty Bool := Eq state`"size" $0.
       Definition enqExpr (v: Expr ty k): Expr ty FifoState :=
         ITE isFullExpr
@@ -92,4 +91,3 @@ Section Fifo.
     End Action.
   End Ty.
 End Fifo.
-*)
