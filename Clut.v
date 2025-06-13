@@ -241,4 +241,4 @@ Definition clut: Mod := {|modDecl := clutIfc;
 
 Definition compiledMod := compile clut.
 
-Extraction "Compile" size genFinType compiledMod.
+Extraction "Compile" size genFinType finNum updList compiledMod.
