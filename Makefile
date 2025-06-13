@@ -6,16 +6,15 @@ CHERIOT_ROOT = $(HOME)/cheriot
 CURR_DIR = $(shell pwd)
 
 Switcher.v:
-	echo "From Stdlib Require Import List BinInt." > Switcher.v
-	echo "Import ListNotations." >> Switcher.v
+	echo "From Stdlib Require Import List ZArith Zmod." > Switcher.v
 	echo "" >> Switcher.v
 	echo "Local Open Scope Z_scope." >> Switcher.v
 	echo "" >> Switcher.v
-	echo "Definition switcher: list Z := (" >> Switcher.v
+	echo "Definition switcher: list (bits 8) := (" >> Switcher.v
 	echo $(CURR_DIR)
 	cd $(CHERIOT_ROOT)/cheriot-rtos/examples/02.hello_compartment && xmake config --sdk=$(CHERIOT_ROOT)/cheriot-llvm/builds/cheriot-llvm && xmake && cd $(CURR_DIR)
 	$(CHERIOT_ROOT)/cheriot-llvm/builds/cheriot-llvm/bin/llvm-objcopy -O binary -j .text $(CHERIOT_ROOT)/cheriot-rtos/examples/02.hello_compartment/build/.objs/cheriot.switcher/cheriot/cheriot/release/__/__/sdk/core/switcher/entry.S.o $(CURR_DIR)/tmp && cd $(CURR_DIR)
-	hexdump -e '1/1 "%03u " "::\n"' -v tmp >> Switcher.v
+	hexdump -e '1/1 "Zmod.of_Z _ 0x%02x " "::\n"' -v tmp >> Switcher.v
 	rm tmp
 	echo "nil)." >> Switcher.v
 

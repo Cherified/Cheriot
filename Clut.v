@@ -1,6 +1,5 @@
-From Stdlib Require Import String List PeanoNat.
-Require Import Guru.Lib.Word Guru.Lib.Library.
-Require Import Guru.Syntax Guru.Notations Guru.Compiler Guru.Extraction.
+From Stdlib Require Import String List ZArith.
+Require Import Guru.Library Guru.Syntax Guru.Notations Guru.Compiler Guru.Extraction.
 
 Import ListNotations.
 
@@ -8,10 +7,11 @@ Set Implicit Arguments.
 Unset Strict Implicit.
 Set Asymmetric Patterns.
 
+Local Open Scope Z_scope.
 Definition Xlen := 32.
 Definition Addr := Bit Xlen.
 
-Definition NumChannels := 4.
+Definition NumChannels := 4%nat.
 
 Definition PhyAddrSz := 22. (* 2-MB physical memory *)
 Definition PseudoAddrSz := 25.  (* AXI address width size *)
@@ -20,7 +20,7 @@ Definition LgClutSz := Eval compute in (PseudoAddrSz - PhyAddrSz). (* Log of num
 Definition PhyAddr := Bit PhyAddrSz.
 Definition PseudoAddr := Bit PseudoAddrSz.
 Definition ClutIdx := Bit LgClutSz.
-Definition ClutSz := Eval compute in (Nat.pow 2 LgClutSz).
+Definition ClutSz := Eval compute in (Z.shiftl 1 LgClutSz).
 
 Section Clut.
   Variable ty: Kind -> Type.
@@ -42,13 +42,13 @@ Section Clut.
   Goal (size ClutEntry >= LgClutSz).
   Proof.
     cbv.
-    Lia.lia.
+    discriminate.
   Qed.
 
   Goal (LgClutSz >= 1).
   Proof.
     cbv.
-    Lia.lia.
+    discriminate.
   Qed.
 
   (* Command from Processor to insert or remove *)
@@ -66,9 +66,9 @@ Section Clut.
 
   Definition clutIfc := {|modRegs := [
                             (* Keeps track if entry is used *)
-                            ("valids", Build_Reg (Array ClutSz Bool) (Default _));
+                            ("valids", Build_Reg (Array (Z.to_nat ClutSz) Bool) (Default _));
                             (* Keeps track of outstanding transactions *)
-                            ("busys", Build_Reg (Array ClutSz Bool) (Default _));
+                            ("busys", Build_Reg (Array (Z.to_nat ClutSz) Bool) (Default _));
                             (* Command from processor split into two registers *)
                             ("procCommand1", Build_Reg (Bit Xlen) (Default _));
                             ("procCommand2", Build_Reg (Bit LeftOverCommandSize) (Default _));
@@ -77,7 +77,7 @@ Section Clut.
                           modMems := [];
                           modRegUs := [
                             (* All the entries *)
-                            ("entries", Array ClutSz ClutEntry)];
+                            ("entries", Array (Z.to_nat ClutSz) ClutEntry)];
                           modMemUs := [];
                           modSends :=
                             ("respToProc", Bit Xlen) ::
@@ -103,7 +103,7 @@ Section Clut.
       Let optCommand : Option Command <- FromBit (Option Command) {< #procCommand2, #procCommand1 >};
 
       (* Find an empty slot in freeIndex. Highest bit of freeIndex is 1 if no empty slot is found *)
-      Let optFreeIndex: Bit (LgClutSz + 1) <- countTrailingZeros (LgClutSz + 1) (Inv (ToBit #valids));
+      Let optFreeIndex: Bit (LgClutSz + 1) <- countTrailingZerosArray (Not #valids) (LgClutSz + 1);
       Let freeIndex: ClutIdx <- TruncLsb 1 LgClutSz #optFreeIndex;
       Let freeIndexValid: Bool <- Not (FromBit Bool (TruncMsb 1 LgClutSz #optFreeIndex));
 
@@ -172,16 +172,17 @@ Section Clut.
       Return #dummy).
 
   Section PerChannel.
-    Variable channelIdA: FinArray NumChannels.
+    Variable channelIdA: FinType NumChannels.
     Definition channelIdS: FinStruct (msends cl) :=
-      inr (FinArray_to_FinStruct channelIdA (repeat_length ("dmaCanAccess", Bool) NumChannels)).
-
+      Build_FinType (n := S NumChannels) (S channelIdA.(finNum)) channelIdA.(finLt).
+      
     Theorem Bool_channelIdS: Bool = fieldK (ls := msends cl) channelIdS.
     Proof.
       unfold NumChannels, channelIdS in *.
-      simpl.
-      destruct channelIdA; auto.
-      repeat (destruct f; auto).
+      destruct channelIdA;
+        simpl; auto.
+      do 4 (destruct finNum; auto).
+      destruct finNum; contradiction.
     Qed.
 
     (* DMA checks if it can access a particular pseudo-address *)
@@ -235,9 +236,9 @@ Section Clut.
 End Clut.
 Definition clut: Mod := {|modDecl := clutIfc;
                           modActions := fun ty => commandFromProc ty :: configFromProc ty ::
-                                                    map (dmaCheckAccess ty) (genFinArray NumChannels) ++
-                                                    map (finishRead ty) (genFinArray NumChannels) |}.
+                                                    map (dmaCheckAccess ty) (genFinType NumChannels) ++
+                                                    map (finishRead ty) (genFinType NumChannels) |}.
 
 Definition compiledMod := compile clut.
 
-Extraction "Compile" size genFinStruct genFinArray compiledMod.
+Extraction "Compile" size genFinType finNum updList compiledMod.

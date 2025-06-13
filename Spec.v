@@ -1,6 +1,5 @@
-From Stdlib Require Import String List.
-Require Import Guru.Lib.Library Guru.Lib.Word.
-Require Import Guru.Syntax Guru.Notations Guru.Semantics.
+From Stdlib Require Import String List ZArith Zmod Bool.
+Require Import Guru.Syntax Guru.Notations Guru.Semantics Guru.Library.
 Require Import Cheriot.Alu Cheriot.Switcher.
 
 Set Implicit Arguments.
@@ -14,16 +13,16 @@ Section Spec.
   Variable MemWidthGe3: MemWidth >= 3.
   Definition MemByteSz := Nat.pow 2 MemWidth.
   Definition Mem64Sz := Nat.pow 2 (MemWidth - 3).
-  Variable specTagsR: type (Array Mem64Sz Bool).
+  Definition switcherLength := Eval compute in (length switcher).
+  Definition specInst: type (Array switcherLength (Bit 8)) := Build_SameTuple (tupleElems := switcher)
+                                                                (I: Is_true (length switcher =? switcherLength)).
   Variable specMemR: type (Array MemByteSz (Bit 8)).
+  Variable specTagsR: type (Array Mem64Sz Bool).
   Variable specRegsR: type (Array NumRegs FullECapWithTag).
   Definition specWaits := Default (Array NumRegs Bool).
   Variable specCsrsR: type Csrs.
   Variable specScrsR: type Scrs.
   Variable specInterruptsR: type Interrupts.
-
-  Variable mtccVal: type Addr.
-  Variable switcherMatches: ReadArrayFromListZEq specMemR (wordToNat mtccVal) switcher.
 
   Local Open Scope string_scope.
   Local Open Scope guru_scope.
@@ -40,11 +39,11 @@ Section Spec.
                                  "specInterrupts" :: Interrupts }.
 
   Definition specInit: type SpecState := STRUCT_CONST {
-                                              "specMem" ::= specMemR;
-                                              "specTags" ::= specTagsR;
-                                              "specRegs" ::= specRegsR;
-                                              "specCsrs" ::= specCsrsR;
-                                              "specScrs" ::= specScrsR }.
+                                             "specMem" ::= specMemR;
+                                             "specTags" ::= specTagsR;
+                                             "specRegs" ::= specRegsR;
+                                             "specCsrs" ::= specCsrsR;
+                                             "specScrs" ::= specScrsR }.
 
   Definition specRegs := [("specState", Build_Reg _ specInit);
                           ("specInterrupts", Build_Reg _ specInterruptsR)].
@@ -68,8 +67,16 @@ Section Spec.
     Section LetExpr.
       Variable state: Expr ty AllSpecState.
 
-      Definition stepExpr: LetExpr ty AllSpecState :=
-        ( LetE specMem <- state`"specState"`"specMem";
+      Ltac specSimpl x :=
+        (let y := eval cbv [getFinStruct structList arraySize fieldK forceOption getFinStructOption length
+                              fst snd String.eqb Ascii.eqb Bool.eqb fieldNameK nth_pf finNum] in x in
+           simplKind y).
+
+      Notation specSimpl x := ltac:(specSimpl x) (only parsing).
+
+      Definition stepExpr: LetExpr ty AllSpecState := specSimpl
+        ( LetE specInst : Array switcherLength (Bit 8) <- Const ty _ specInst;
+          LetE specMem <- state`"specState"`"specMem";
           LetE specTags <- state`"specState"`"specTags";
           LetE specRegs <- state`"specState"`"specRegs";
           LetE specCsrs <- state`"specState"`"specCsrs";
@@ -80,10 +87,10 @@ Section Spec.
           LetE BoundsException : Bool <- And [Slt (ZeroExtend 1 #pcVal) (##pcc`"ecap"`"top")];
           LetE pcAluOut: PcAluOut <- STRUCT { "pcVal" ::= #pcVal;
                                               "BoundsException" ::= #BoundsException };
-          LetE inst: Inst <- {< #specMem@[Add [#pcVal; $3]],
-                         #specMem@[Add [#pcVal; $2]],
-                         #specMem@[Add [#pcVal; $1]],
-                         #specMem@[#pcVal] >};
+          LetE inst: Inst <- {< #specInst@[Add [#pcVal; $3]],
+                         #specInst@[Add [#pcVal; $2]],
+                         #specInst@[Add [#pcVal; $1]],
+                         #specInst@[#pcVal] >};
           LETE decodeOut: DecodeOut <- decode #inst;
           
           LetE aluIn: AluIn <- STRUCT { "pcAluOut" ::= #pcAluOut;
@@ -97,20 +104,24 @@ Section Spec.
           LetE memAddr: Addr <- #aluOut`"memAddr";
           LetE memSz: Bit MemSzSz <- #aluOut`"memSz";
           LetE ldUn: Bool <- #aluOut`"LoadUnsigned";
-          
-          LetE ldCap: Cap <- FromBit Cap {< #specMem@[Add [#memAddr; $7]],
-                          #specMem@[Add [#memAddr; $6]],
-                          #specMem@[Add [#memAddr; $5]],
-                          #specMem@[Add [#memAddr; $4]] >};
+
+          LetE byte7: Bit 8 <- #specMem@[Add [#memAddr; $7]];
+          LetE byte6: Bit 8 <- #specMem@[Add [#memAddr; $6]];
+          LetE byte5: Bit 8 <- #specMem@[Add [#memAddr; $5]];
+          LetE byte4: Bit 8 <- #specMem@[Add [#memAddr; $4]];
+          LetE byte3: Bit 8 <- #specMem@[Add [#memAddr; $3]];
+          LetE byte2: Bit 8 <- #specMem@[Add [#memAddr; $2]];
+          LetE byte1: Bit 8 <- #specMem@[Add [#memAddr; $1]];
+          LetE byte0: Bit 8 <- #specMem@[#memAddr];
+          LetE ldNoCap: Bit 32 <- {< #byte7, #byte6, #byte5, #byte4 >};
+          LetE ldCap: Cap <- FromBit Cap #ldNoCap;
           LetE ldValFinal: Data <-
                              ITE (Eq #memSz $0)
-                             (signOrZeroExtend #ldUn #specMem@[#memAddr])
+                             (signOrZeroExtend #ldUn #byte0)
                              (ITE (Eq #memSz $1)
-                                (signOrZeroExtend #ldUn {<#specMem@[Add [#memAddr; $1]], #specMem@[#memAddr]>})
-                                {< #specMem@[Add [#memAddr; $3]],
-                                  #specMem@[Add [#memAddr; $2]],
-                                  #specMem@[Add [#memAddr; $1]],
-                                  #specMem@[#memAddr] >});
+                                (signOrZeroExtend #ldUn {<#byte1, #byte0>})
+                                {<#byte3, #byte2, #byte1, #byte0>});
+          
           LETE ldECap: ECap <- decodeCap #ldCap #ldValFinal;
           LetE ldECapFinal: ECap <- ITE (Eq #memSz $3) #ldECap ConstDef;
           LetE memTagAddr: Bit (AddrSz - 3) <- TruncMsb (AddrSz - 3) 3 #memAddr;
@@ -124,30 +135,22 @@ Section Spec.
           LetE ldRegIdx <- #aluOut`"ldRegIdx";
           LetE aluOutRegs: Array NumRegs FullECapWithTag <- #aluOut`"regs";
           LetE newRegs: Array NumRegs FullECapWithTag <- #aluOutRegs
-                          @[ #ldRegIdx <-  ITE (##aluOut`"Load") #ldFinal
+                          @[ #ldRegIdx <-  ITE (#aluOut`"Load") #ldFinal
                                (#aluOutRegs@[#ldRegIdx])];
 
           LETE stCap: Cap <- encodeCap (##aluOut`"storeVal"`"ecap");
-          LetE stCapBits: Bit DXlen <- {< ToBit #stCap, ##aluOut`"storeVal"`"addr" >};
-          LetE stCapArr: Array 8 (Bit 8) <- FromBit (Array 8 (Bit 8)) #stCapBits;
+          LetE stBits: Bit DXlen <- {< ToBit #stCap, ##aluOut`"storeVal"`"addr" >};
           LetE Store: Bool <- #aluOut`"Store";
 
           LetE newMem: Array MemByteSz (Bit 8) <- #specMem
-                         @[Add [#memAddr; $7] <- ITE (And [Eq #memSz $3; #Store]) #stCapArr$[7]
-                             (#specMem@[Add [#memAddr; $7]])]
-                         @[Add [#memAddr; $6] <- ITE (And [Eq #memSz $3; #Store]) #stCapArr$[6]
-                             (#specMem@[Add [#memAddr; $6]])]
-                         @[Add [#memAddr; $5] <- ITE (And [Eq #memSz $3; #Store]) #stCapArr$[5]
-                             (#specMem@[Add [#memAddr; $5]])]
-                         @[Add [#memAddr; $4] <- ITE (And [Eq #memSz $3; #Store]) #stCapArr$[4]
-                             (#specMem@[Add [#memAddr; $4]])]
-                         @[Add [#memAddr; $3] <- ITE (And [Sge #memSz $2; #Store]) #stCapArr$[3]
-                             (#specMem@[Add [#memAddr; $3]])]
-                         @[Add [#memAddr; $2] <- ITE (And [Sge #memSz $2; #Store]) #stCapArr$[2]
-                             (#specMem@[Add [#memAddr; $2]])]
-                         @[Add [#memAddr; $1] <- ITE (And [Sge #memSz $1; #Store]) #stCapArr$[1]
-                             (#specMem@[Add [#memAddr; $1]])]
-                         @[#memAddr <- ITE #Store #stCapArr$[0] (#specMem@[#memAddr])];
+                         @[Add [#memAddr; $7] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[63:56] #byte7]
+                         @[Add [#memAddr; $6] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[55:48] #byte6]
+                         @[Add [#memAddr; $5] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[47:40] #byte5]
+                         @[Add [#memAddr; $4] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[39:32] #byte4]
+                         @[Add [#memAddr; $3] <- ITE (And [Sge #memSz $2; #Store]) #stBits`[31:24] #byte3]
+                         @[Add [#memAddr; $2] <- ITE (And [Sge #memSz $2; #Store]) #stBits`[23:16] #byte2]
+                         @[Add [#memAddr; $1] <- ITE (And [Sge #memSz $1; #Store]) #stBits`[15:8] #byte1]
+                         @[#memAddr <- ITE #Store #stBits`[7:0] #byte0];
 
           LetE newTags: Array Mem64Sz Bool <- #specTags
                           @[#memTagAddr <- ITE (And [Eq #memSz $3; #Store]) (##aluOut`"storeVal"`"tag") #ldTag];
@@ -178,8 +181,6 @@ Section Spec.
         Return ConstDef ).
   End Ty.
 
-  Definition step1 (e: type AllSpecState) := evalLetExpr (stepExpr #e).
-
   Definition spec: Mod := {|modDecl := specDecl;
                             modActions := fun ty => [step ty; async ty]|}.
 
@@ -188,19 +189,31 @@ Section Spec.
 
   Definition SpecInvariant (s: ModStateModDecl specDecl) : Prop :=
     RegsInvariant (stateRegs s) /\
-      (forall i, stateMems s i = match i with end) /\
-      (forall i, stateRegUs s i = match i with end) /\
-      (forall i, stateMemUs s i = match i with end).
+      (stateMems s = tt) /\
+      (stateRegUs s = tt) /\
+      (stateMemUs s = tt).
 
   Theorem specInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
-      SemAction (step type) old new puts gets WO ->
+      SemAction (step type) old new puts gets Zmod.zero ->
       SpecInvariant new.
   Admitted.
 
   Theorem asyncInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
-      SemAction (async type) old new puts gets WO ->
+      SemAction (async type) old new puts gets Zmod.zero ->
       SpecInvariant new.
   Admitted.
 End Spec.
+
+(*
+Set Printing Depth 1000.
+
+Time
+  Definition evalStepExpr (state: Expr type AllSpecState): type AllSpecState :=
+  ltac:( let x := eval cbn delta -[evalFromBitStruct] beta iota in (evalLetExpr (stepExpr state)) in
+           let x := eval cbv delta [mapSameTuple updSameTuple updSameTupleNat Bool.transparent_Is_true]
+                      beta iota in x in
+             let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
+               exact x).
+*)
