@@ -1872,7 +1872,7 @@ Section Alu.
                                "FenceI" ::= And [FenceI; Not #isException] })).
 End Alu.
 
-(* TODO: Pipelines (Load, LoadCap, Store, Fetch), Split binary into membanks *)
+(* TODO: Pipelines (Load, LoadCap, Store, Fetch, hardware-revoker), Split binary into membanks *)
 
 (*
 Require Import Guru.Semantics.

@@ -204,16 +204,15 @@ Section Spec.
       SemAction (async type) old new puts gets Zmod.zero ->
       SpecInvariant new.
   Admitted.
-End Spec.
 
-(*
-Set Printing Depth 1000.
+  Ltac simplifyAluExpr v :=
+    let x := eval cbn delta -[evalFromBitStruct] beta iota in v in
+      let x := eval cbv delta [mapSameTuple updSameTuple updSameTupleNat Bool.transparent_Is_true]
+                 beta iota in x in
+        let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
+          x.
 
-Time
   Definition evalStepExpr (state: Expr type AllSpecState): type AllSpecState :=
-  ltac:( let x := eval cbn delta -[evalFromBitStruct] beta iota in (evalLetExpr (stepExpr state)) in
-           let x := eval cbv delta [mapSameTuple updSameTuple updSameTupleNat Bool.transparent_Is_true]
-                      beta iota in x in
-             let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
-               exact x).
-*)
+    ltac:(let x := simplifyAluExpr (evalLetExpr (stepExpr state)) in exact x).
+
+End Spec.
