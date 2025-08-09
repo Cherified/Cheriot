@@ -387,20 +387,12 @@ Section Cap.
 
     Local Notation shift_m_e sm m e :=
       (ITE (FromBit Bool (TruncMsb 1 sm m))
-         ((STRUCT { "fst" ::= Add [ZeroExtend 1 (TruncMsb sm 1 m); ZeroExtend sm (TruncLsb sm 1 m)];
-                    "snd" ::= Add [e; $1] }) : Expr ty (Pair (Bit (sm + 1)) (Bit ExpSz)))
-         ((STRUCT { "fst" ::= m;
-                    "snd" ::= e }) : Expr ty (Pair (Bit (sm + 1)) (Bit ExpSz))))
+         ((STRUCT { "fst" ::= Add [TruncMsb sm 1 m; ZeroExtendTo sm (TruncLsb sm 1 m)];
+                    "snd" ::= Add [e; $1] }) : Expr ty (Pair (Bit sm) (Bit ExpSz)))
+         ((STRUCT { "fst" ::= TruncLsb 1 sm m;
+                    "snd" ::= e }) : Expr ty (Pair (Bit sm) (Bit ExpSz))))
         (sm in scope Z_scope, m in scope guru_scope, only parsing).
 
-    Local Notation shift_m_e_twice sm m e :=
-      (LetE me: Pair (Bit (sm + 1)) (Bit ExpSz) <- shift_m_e sm m e;
-       LetE m1e1: Pair (Bit (sm + 1)) (Bit ExpSz) <- shift_m_e sm (##me`"fst") (##me`"snd");
-       @RetE _ (Pair (Bit sm) (Bit ExpSz))
-         (STRUCT {
-              "fst" ::= ((TruncLsb 1 sm (##m1e1`"fst")) : Expr ty (Bit sm));
-              "snd" ::= (#m1e1`"snd") })) (sm in scope Z_scope, only parsing).
-    
     Definition Bounds :=
       STRUCT_TYPE {
           "E" :: Bit ExpSz;
@@ -417,7 +409,8 @@ Section Cap.
                            Not (countLeadingZerosArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) _)];
         LetE e_lgCeilAdd1: Bool <-
                              Or [isNotZero (TruncLsb (AddrSz + 1 - CapBSz) CapBSz length);
-                                 (Neq (countOnesArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) ExpSz) $1)];
+                                 (Neq (countOnesArray (mkBoolArray (AddrSz + 1 - CapBSz)
+                                                         (Add [#lenTrunc; $1])) ExpSz) $1)];
         LetE eLength: Bit ExpSz <-
                         Add [#eInit; ZeroExtendTo ExpSz (ToBit (ITE IsSubset (isZero #lenTrunc) #e_lgCeilAdd1))];
         LetE eBaseUncorrected : Bit (Z.log2_up (AddrSz + 1)) <-
@@ -434,13 +427,12 @@ Section Cap.
         LetE iFloor : Bit 2 <- TruncLsb (AddrSz - CapBSz) 2 (Srl #sum_mod_e #e);
         LetE lost_sum : Bool <- isNotZero (And [#sum_mod_e; #mask_e]);
         LetE iCeil : Bit 2 <- Add [#iFloor; ZeroExtendTo 2 (ToBit #lost_sum)];
-        LetE d : Bit (CapBSz + 2) <- TruncLsb (AddrSz - 1 - CapBSz) (CapBSz + 2) (Srl length #e);
-        LetE m : Bit (CapBSz + 2) <- Add [ITE #fixedBase_eBase_lt_eLength $(Z.shiftl 1 CapMSz - 1) #d;
-                                            ZeroExtend CapBSz (ITE IsSubset $0 #iCeil)];
-        LETE m1e1: Pair (Bit (CapBSz + 1)) (Bit ExpSz) <- shift_m_e_twice (CapBSz + 1) #m #e;
-        LETE m2e2: Pair (Bit CapBSz) (Bit ExpSz) <- shift_m_e_twice (CapBSz) (##m1e1`"fst") (##m1e1`"snd");
-        LetE mf: Bit CapBSz <- #m2e2`"fst";
-        LetE efUnsat: Bit ExpSz <- #m2e2`"snd";
+        LetE d : Bit (CapBSz + 1) <- TruncLsb (AddrSz - CapBSz) (CapBSz + 1) (Srl length #e);
+        LetE m : Bit (CapBSz + 1) <- Add [ITE #fixedBase_eBase_lt_eLength $(Z.shiftl 1 CapMSz - 1) #d;
+                                            ZeroExtend (CapBSz-1) (ITE IsSubset $0 #iCeil)];
+        LetE m1e1: Pair (Bit CapBSz) (Bit ExpSz) <- shift_m_e CapBSz #m #e;
+        LetE mf: Bit CapBSz <- #m1e1`"fst";
+        LetE efUnsat: Bit ExpSz <- #m1e1`"snd";
         LetE isESaturated: Bool <- Sgt #efUnsat $(AddrSz + 1 - CapBSz);
         LetE ef: Bit ExpSz <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
         LetE cram : Bit (AddrSz + 1) <- Sll (ConstBit (Zmod.of_Z _ (-1))) #ef;
