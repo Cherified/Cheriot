@@ -101,9 +101,9 @@ Section Spec.
                                         "scrs" ::= #specScrs;
                                         "interrupts" ::= #specInterrupts };
           LETE aluOut: AluOut <- alu (#pcc`"tag") (##pcc`"ecap") #aluIn;
-          LetE memAddr: Addr <- #aluOut`"memAddr";
-          LetE memSz: Bit MemSzSz <- #aluOut`"memSz";
-          LetE ldUn: Bool <- #aluOut`"LoadUnsigned";
+          LetE memAddr: Addr <- ##aluOut`"multicycleOp"`"memAddr";
+          LetE memSz: Bit MemSzSz <- ##aluOut`"multicycleOp"`"memSz";
+          LetE ldUn: Bool <- ##aluOut`"multicycleOp"`"LoadUnsigned";
 
           LetE byte7: Bit 8 <- #specMem@[Add [#memAddr; $7]];
           LetE byte6: Bit 8 <- #specMem@[Add [#memAddr; $6]];
@@ -132,15 +132,15 @@ Section Spec.
                                                     "ecap" ::= #ldECapFinal;
                                                     "addr" ::= #ldValFinal };
 
-          LetE ldRegIdx <- #aluOut`"ldRegIdx";
+          LetE ldRegIdx <- ##aluOut`"multicycleOp"`"loadRegIdx";
           LetE aluOutRegs: Array NumRegs FullECapWithTag <- #aluOut`"regs";
           LetE newRegs: Array NumRegs FullECapWithTag <- #aluOutRegs
-                          @[ #ldRegIdx <-  ITE (#aluOut`"Load") #ldFinal
+                          @[ #ldRegIdx <-  ITE (##aluOut`"multicycleOp"`"Load") #ldFinal
                                (#aluOutRegs@[#ldRegIdx])];
 
-          LETE stCap: Cap <- encodeCap (##aluOut`"storeVal"`"ecap");
-          LetE stBits: Bit DXlen <- {< ToBit #stCap, ##aluOut`"storeVal"`"addr" >};
-          LetE Store: Bool <- #aluOut`"Store";
+          LETE stCap: Cap <- encodeCap (##aluOut`"multicycleOp"`"storeVal"`"ecap");
+          LetE stBits: Bit DXlen <- {< ToBit #stCap, ##aluOut`"multicycleOp"`"storeVal"`"addr" >};
+          LetE Store: Bool <- ##aluOut`"multicycleOp"`"Store";
 
           LetE newMem: Array MemByteSz (Bit 8) <- #specMem
                          @[Add [#memAddr; $7] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[63:56] #byte7]
@@ -153,7 +153,7 @@ Section Spec.
                          @[#memAddr <- ITE #Store #stBits`[7:0] #byte0];
 
           LetE newTags: Array Mem64Sz Bool <- #specTags
-                          @[#memTagAddr <- ITE (And [Eq #memSz $3; #Store]) (##aluOut`"storeVal"`"tag") #ldTag];
+                          @[#memTagAddr <- ITE (And [Eq #memSz $3; #Store]) (##aluOut`"multicycleOp"`"storeVal"`"tag") #ldTag];
 
           LetE newSpecState: SpecState <- STRUCT { "specMem" ::= #newMem;
                                                    "specTags" ::= #newTags;
@@ -212,7 +212,8 @@ Section Spec.
         let x := eval cbn delta -[evalFromBitStruct] beta iota in x in
           x.
 
+  (*
   Definition evalStepExpr (state: Expr type AllSpecState): type AllSpecState :=
     ltac:(let x := simplifyAluExpr (evalLetExpr (stepExpr state)) in exact x).
-
+   *)
 End Spec.

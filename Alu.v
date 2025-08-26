@@ -609,26 +609,28 @@ Definition AluIn :=
                  "scrs" :: Scrs ;
            "interrupts" :: Interrupts }.
 
+Definition MulticycleOp := STRUCT_TYPE { "loadRegIdx"   :: Bit RegIdSz;
+                                         "memAddr"      :: Addr;
+                                         "storeVal"     :: FullECapWithTag;
+                                         "LoadUnsigned" :: Bool;
+                                         "memSz"        :: Bit MemSzSz;
+                                         "Load"         :: Bool;
+                                         "Store"        :: Bool }.
+
 Definition AluOut := STRUCT_TYPE { "regs" :: Array NumRegs FullECapWithTag ;
                                    "waits" :: Array NumRegs Bool ;
                                    "csrs" :: Csrs ;
                                    "scrs" :: Scrs ;
                                    "interrupts" :: Interrupts ;
-                                   "ldRegIdx" :: Bit RegIdSz ;
-                                   "memAddr" :: Addr ;
-                                   "storeVal" :: FullECapWithTag ;
+                                   "multicycleOp" :: MulticycleOp ;
                                    "exception" :: Bool ; (* Note: For Branch Predictor *)
                                    "MRet" :: Bool ; (* Note: For Branch Predictor *)
                                    "Branch" :: Bool ; (* Note: For Branch Predictor *)
                                    "CJal" :: Bool ; (* Note: For Branch Predictor *)
                                    "CJalr" :: Bool ; (* Note: For Branch Predictor *)
-                                   "LoadUnsigned" :: Bool ;
-                                   "memSz" :: Bit MemSzSz ;
                                    "pcNotLinkAddrTagVal" :: Bool ;
                                    "pcNotLinkAddrCap" :: Bool ;
                                    "stall" :: Bool ;
-                                   "Load" :: Bool ;
-                                   "Store" :: Bool ;
                                    "FenceI" :: Bool }.
 
 Section Decode.
@@ -1841,28 +1843,41 @@ Section Alu.
       LetE newWaits : Array NumRegs Bool <-
                         waits @[ #rdIdx <- And [MultiCycle; isNotZero #rdIdx; Not #isException] ];
 
+      LetE multicycleOp : MulticycleOp <- STRUCT { "loadRegIdx" ::= #rdIdx;
+                                                   "memAddr" ::= #resAddrVal;
+                                                   "storeVal" ::= #reg2;
+                                                   "LoadUnsigned" ::= LoadUnsigned;
+                                                   "memSz" ::= memSz;
+                                                   "Load" ::= And [Load; isNotZero #rdIdx; Not #isException];
+                                                   "Store" ::= And [Store; Not #isException] };
+
+
       @RetE _ AluOut (STRUCT { "regs" ::= #newRegs ;
                                "waits" ::= #newWaits ;
                                "csrs" ::= #newCsrs ;
                                "scrs" ::= #newScrs ;
                                "interrupts" ::= #newInterrupts ;
-                               "ldRegIdx" ::= #rdIdx ;
-                               "memAddr" ::= #resAddrVal ;
-                               "storeVal" ::= #reg2 ;
+                               "multicycleOp" ::= #multicycleOp ;
                                "exception" ::= #isException ;
                                "MRet" ::= And [MRet; Not #isException] ;
                                "Branch" ::= And [Branch; Not #isException] ;
                                "CJal" ::= And [CJal; Not #isException] ;
                                "CJalr" ::= And [CJalr; Not #isException] ;
-                               "LoadUnsigned" ::= LoadUnsigned ;
-                               "memSz" ::= memSz ;
                                "pcNotLinkAddrTagVal" ::= #pcNotLinkAddrTagVal ;
                                "pcNotLinkAddrCap" ::= #pcNotLinkAddrCap ;
                                "stall" ::= #stall ;
-                               "Load" ::= And [Load; isNotZero #rdIdx; Not #isException] ;
-                               "Store" ::= And [Store; Not #isException] ;
                                "FenceI" ::= And [FenceI; Not #isException] })).
 End Alu.
+
+Section MemPipeline.
+  Variable ty: Kind -> Type.
+  Variable ldRegIdx: Expr ty (Bit RegIdSz).
+  Variable memAddr: Expr ty Addr.
+  Variable stVal: Expr ty FullECapWithTag.
+  Variable isLoadUnsigned: Expr ty Bool.
+  Variable memSz: Expr ty (Bit MemSzSz).
+  Variable isLoad isStore: Expr ty Bool.
+End MemPipeline.
 
 (* TODO: Pipelines (Load, LoadCap, Store, Fetch, hardware-revoker), Split binary into membanks *)
 
