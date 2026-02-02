@@ -10,13 +10,13 @@ Import ListNotations.
 Section BankedMem.
   Local Open Scope Z.
   (* Num8Banks and NumBanks used in Array and repeat; EachSize used in Array; rest should be Z *)
-  Variable LgNum8Banks: Z.
-  Variable LgEachSize: Z.
+  Variable LgNum8Banks: Z. (* Lg of Number of 64-bit sized banks *)
+  Variable LgEachSize: Z. (* Lg of Size of each bank *)
   Variable LgEachSizeGe0: LgEachSize >= 0.
   Variable memLists: ModLists.
-  Variable p: FinType 2.
+  Variable port: FinType 2.
 
-  Local Definition LgNumBanks := 3 + LgNum8Banks.
+  Local Definition LgNumBanks := 3 + LgNum8Banks. (* Lg of Number of 8-bit sized banks *)
   Local Definition Num8Banks := Z.to_nat (Z.shiftl 1 LgNum8Banks).
   Local Definition NumBanks := Z.to_nat (Z.shiftl 1 LgNumBanks).
   Local Definition EachSize := Z.to_nat (Z.shiftl 1 LgEachSize).
@@ -150,7 +150,7 @@ Section BankedMem.
 
     Local Definition doLoadRpNoRot : Action ty memLists (Array (length memLists.(mmems)) (Bit 8)) :=
       fold_right (fun memIdx acc =>
-                    ReadRpMem (modLists := memLists) "readMemRp" memIdx (portCast memIdx p)
+                    ReadRpMem (modLists := memLists) "readMemRp" memIdx (portCast memIdx port)
                       (fun val =>
                          (LetA rest: Array (length memLists.(mmems)) (Bit 8) <- acc;
                           Return (UpdateArrayConst #rest memIdx (castBitsKind2 (valCast memIdx) #val)))))
@@ -172,7 +172,7 @@ Section BankedMem.
 
     Definition doLoadRq : Action ty memLists (Bit 0) :=
       fold_right (fun memIdx acc =>
-                    ReadRqMem (modLists := memLists) memIdx (castLineIdx memIdx) (portCast memIdx p) acc)
+                    ReadRqMem (modLists := memLists) memIdx (castLineIdx memIdx) (portCast memIdx port) acc)
         (Return ConstDef) (genFinType (length (mmems memLists))).
 
     Definition doWrite : Action ty memLists (Bit 0) :=
@@ -191,7 +191,7 @@ Section BankedMem.
 
     Definition doLoadRqTag : Action ty memLists (Bit 0) :=
       fold_right (fun tagIdx acc =>
-                    ReadRqMemU (modLists := memLists) tagIdx (castLineIdxTag tagIdx) (portCastTag tagIdx p) acc)
+                    ReadRqMemU (modLists := memLists) tagIdx (castLineIdxTag tagIdx) (portCastTag tagIdx port) acc)
         (Return ConstDef) (genFinType (length (mmemUs memLists))).
 
     Definition doWriteTag : Action ty memLists (Bit 0) :=
@@ -208,7 +208,7 @@ Section BankedMem.
     Definition doLoadRpTag : Action ty memLists Bool :=
       fold_right
         (fun tagIdx acc =>
-           ReadRpMemU (modLists := memLists) "readTagRp" tagIdx (portCastTag tagIdx p)
+           ReadRpMemU (modLists := memLists) "readTagRp" tagIdx (portCastTag tagIdx port)
              (fun val =>
                 (LetA rest : Bool <- acc;
                  Return
