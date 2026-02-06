@@ -145,8 +145,7 @@ Section BankedMem.
         (rotateLeft (Not (Sll (ConstBit (InvDefault _)) memSz)) shamt).
 
     Local Definition rotWriteVals: Expr ty (Array (length memLists.(mmems)) (Bit 8)) :=
-      FromBit (Array (length memLists.(mmems)) (Bit 8))
-        (rotateLeft (ToBit writeVals) {< shamt, ConstDefK (Bit 3) >}).
+      ArrayRotl 8 writeVals shamt.
 
     Local Definition doLoadRpNoRot : Action ty memLists (Array (length memLists.(mmems)) (Bit 8)) :=
       fold_right (fun memIdx acc =>
@@ -186,8 +185,7 @@ Section BankedMem.
 
     Definition doLoadRp : Action ty memLists (Array (length memLists.(mmems)) (Bit 8)) :=
       (LetA noRotLoadRp : Array (length memLists.(mmems)) (Bit 8) <- doLoadRpNoRot;
-       Return (FromBit (Array (length memLists.(mmems)) (Bit 8))
-                 (rotateRight (ToBit #noRotLoadRp) {< shamt, ConstDefK (Bit 3) >}))).
+       Return (ArrayRotr 8 #noRotLoadRp shamt)).
 
     Definition doLoadRqTag : Action ty memLists (Bit 0) :=
       fold_right (fun tagIdx acc =>

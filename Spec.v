@@ -24,6 +24,19 @@ Section Spec.
   Variable specScrsR: type Scrs.
   Variable specInterruptsR: type Interrupts.
 
+  Variable RevStart: Z.
+  Variable RevByteSz: Z.
+  Variable RevEachBitLgNumBytes: Z.
+  Variable RevEachBitLgNumBytesInMem: (RevEachBitLgNumBytes < Z.of_nat MemWidth)%Z.
+  Variable RevInMem: (RevStart + RevByteSz < Z.of_nat MemByteSz)%Z.
+  Variable HeapStart: Z.
+  Definition HeapEnd := (HeapStart + (RevByteSz * (Z.shiftl 1 RevEachBitLgNumBytes) * 8))%Z.
+  Variable HeapInMem: (HeapEnd < Z.of_nat MemByteSz)%Z.
+
+  Definition RevStartAddr: type (Bit (AddrSz + 1)) := bits.of_Z _ RevStart.
+  Definition HeapStartAddr: type (Bit (AddrSz + 1)) := bits.of_Z _ HeapStart.
+  Definition HeapEndAddr: type (Bit (AddrSz + 1)) := bits.of_Z _ HeapEnd.
+
   Local Open Scope string_scope.
   Local Open Scope guru_scope.
 
@@ -61,11 +74,20 @@ Section Spec.
   Section Ty.
     Variable ty: Kind -> Type.
 
-    Definition signOrZeroExtend (unsigned: Expr ty Bool) n (v: Expr ty (Bit n)) :=
-      ITE unsigned (ZeroExtendTo Xlen v) (SignExtendTo Xlen v).
+    Definition isInHeap (addr: ty (Bit (AddrSz + 1))): Expr ty Bool :=
+      And [Sge #addr (ConstBit HeapStartAddr); Slt #addr (ConstBit HeapEndAddr)].
+
+    Definition revBitNum (addr: ty (Bit (AddrSz + 1))): Expr ty (Bit (AddrSz + 1)) :=
+      Srl (Sub #addr (ConstBit HeapStartAddr)) (ConstBit (bits.of_Z (Z.of_nat MemWidth) RevEachBitLgNumBytes)).
+
+    Definition revBitByteAddr (addr: ty (Bit (AddrSz + 1))): Expr ty (Bit (AddrSz + 1)) :=
+      Srl (revBitNum addr) (ConstBit (bits.of_Z 2 3)).
+
+    Definition revBitByteOffset (addr: ty (Bit (AddrSz + 1))): Expr ty (Bit 3) :=
+      TruncLsb ((AddrSz + 1) - 3) 3 (revBitNum addr).
 
     Section LetExpr.
-      Variable state: Expr ty AllSpecState.
+      Variable state: ty AllSpecState.
 
       Ltac specSimpl x :=
         (let y := eval cbv [getFinStruct structList arraySize fieldK forceOption getFinStructOption length
@@ -76,22 +98,19 @@ Section Spec.
 
       Definition stepExpr: LetExpr ty AllSpecState := specSimpl
         ( LetE specInst : Array switcherLength (Bit 8) <- Const ty _ specInst;
-          LetE specMem <- state`"specState"`"specMem";
-          LetE specTags <- state`"specState"`"specTags";
-          LetE specRegs <- state`"specState"`"specRegs";
-          LetE specCsrs <- state`"specState"`"specCsrs";
-          LetE specScrs <- state`"specState"`"specScrs";
-          LetE specInterrupts <- state`"specInterrupts";
+          LetE specMem <- ##state`"specState"`"specMem";
+          LetE specTags <- ##state`"specState"`"specTags";
+          LetE specRegs <- ##state`"specState"`"specRegs";
+          LetE specCsrs <- ##state`"specState"`"specCsrs";
+          LetE specScrs <- ##state`"specState"`"specScrs";
+          LetE specInterrupts <- ##state`"specInterrupts";
           LetE pcc : FullECapWithTag <- #specRegs $[ 0 ];
           LetE pcVal : Addr <- #pcc`"addr";
           LetE BoundsException : Bool <- And [Slt (ZeroExtend 1 #pcVal) (##pcc`"ecap"`"top")];
           LetE pcAluOut: PcAluOut <- STRUCT { "pcVal" ::= #pcVal;
                                               "BoundsException" ::= #BoundsException };
-          LetE inst: Inst <- {< #specInst@[Add [#pcVal; $3]],
-                         #specInst@[Add [#pcVal; $2]],
-                         #specInst@[Add [#pcVal; $1]],
-                         #specInst@[#pcVal] >};
-          LETE decodeOut: DecodeOut <- decode #inst;
+          LetE inst: Inst <- ToBit (slice #specInst #pcVal (Z.to_nat InstSz/8));
+          LETE decodeOut: DecodeOut <- decode inst;
           
           LetE aluIn: AluIn <- STRUCT { "pcAluOut" ::= #pcAluOut;
                                         "decodeOut" ::= #decodeOut;
@@ -100,60 +119,52 @@ Section Spec.
                                         "csrs" ::= #specCsrs;
                                         "scrs" ::= #specScrs;
                                         "interrupts" ::= #specInterrupts };
-          LETE aluOut: AluOut <- alu (#pcc`"tag") (##pcc`"ecap") #aluIn;
+          LetE pcTag <- #pcc`"tag";
+          LetE pcCap <- #pcc`"ecap";
+          LETE aluOut: AluOut <- alu pcTag pcCap aluIn;
           LetE memAddr: Addr <- ##aluOut`"multicycleOp"`"memAddr";
-          LetE memSz: Bit MemSzSz <- ##aluOut`"multicycleOp"`"memSz";
+          LetE memSz: Bit MemSz <- Sll $1 (##aluOut`"multicycleOp"`"memSz");
+          LetE isCap: Bool <- isZero #memSz;
           LetE ldUn: Bool <- ##aluOut`"multicycleOp"`"LoadUnsigned";
 
-          LetE byte7: Bit 8 <- #specMem@[Add [#memAddr; $7]];
-          LetE byte6: Bit 8 <- #specMem@[Add [#memAddr; $6]];
-          LetE byte5: Bit 8 <- #specMem@[Add [#memAddr; $5]];
-          LetE byte4: Bit 8 <- #specMem@[Add [#memAddr; $4]];
-          LetE byte3: Bit 8 <- #specMem@[Add [#memAddr; $3]];
-          LetE byte2: Bit 8 <- #specMem@[Add [#memAddr; $2]];
-          LetE byte1: Bit 8 <- #specMem@[Add [#memAddr; $1]];
-          LetE byte0: Bit 8 <- #specMem@[#memAddr];
-          LetE ldNoCap: Bit 32 <- {< #byte7, #byte6, #byte5, #byte4 >};
-          LetE ldCap: Cap <- FromBit Cap #ldNoCap;
-          LetE ldValFinal: Data <-
-                             ITE (Eq #memSz $0)
-                             (signOrZeroExtend #ldUn #byte0)
-                             (ITE (Eq #memSz $1)
-                                (signOrZeroExtend #ldUn {<#byte1, #byte0>})
-                                {<#byte3, #byte2, #byte1, #byte0>});
-          
-          LETE ldECap: ECap <- decodeCap #ldCap #ldValFinal;
-          LetE ldECapFinal: ECap <- ITE (Eq #memSz $3) #ldECap ConstDef;
-          LetE memTagAddr: Bit (AddrSz - 3) <- TruncMsb (AddrSz - 3) 3 #memAddr;
+          LetE bytes: Array _ (Bit 8) <- slice #specMem #memAddr (Z.to_nat DXlenBytes);
+          LetE fullCap <- FromBit FullCap (ToBit #bytes);
+          LetE ldCap: Cap <- #fullCap`"cap";
+          LetE ldVal <- FromBit (Array (Z.to_nat XlenBytes) (Bit 8)) #fullCap`"addr";
+          LetE ldValFinal <- ToBit (ITE #ldUn (ArrayZeroExtend #memSz #ldVal) (ArraySignExtend #memSz #ldVal));
+          LETE ldECap: ECap <- decodeCap ldCap ldValFinal;
+          LetE ldECapFinal: ECap <- ITE #isCap #ldECap ConstDef;
+          LetE memTagAddr: Bit (AddrSz - MemSz) <- TruncMsb _ MemSz #memAddr;
           LetE ldTag: Bool <- #specTags@[#memTagAddr];
-          LetE ldTagFinal: Bool <- ITE (Eq #memSz $3) #ldTag (ConstBool false);
-
+          LetE ldBase: Bit (AddrSz + 1) <- #ldECap`"base";
+          LetE revByte: Array 8 Bool <- FromBit (Array 8 Bool) #specMem@[revBitByteAddr ldBase];
+          LetE revBit: Bool <- #revByte@[revBitByteOffset ldBase];
+          LetE ldTagFinal: Bool <- ITE #isCap (And [#ldTag; Not #revBit]) ConstDef;
           LetE ldFinal: FullECapWithTag <- STRUCT { "tag" ::= #ldTagFinal;
                                                     "ecap" ::= #ldECapFinal;
                                                     "addr" ::= #ldValFinal };
 
           LetE ldRegIdx <- ##aluOut`"multicycleOp"`"loadRegIdx";
-          LetE aluOutRegs: Array NumRegs FullECapWithTag <- #aluOut`"regs";
+          LetE aluOutRegs: Array NumRegs FullECapWithTag <- ##aluOut`"regs";
           LetE newRegs: Array NumRegs FullECapWithTag <- #aluOutRegs
-                          @[ #ldRegIdx <-  ITE (##aluOut`"multicycleOp"`"Load") #ldFinal
-                               (#aluOutRegs@[#ldRegIdx])];
+                                                           @[ #ldRegIdx <- ITE (##aluOut`"multicycleOp"`"Load")
+                                                                             #ldFinal
+                                                                             (#aluOutRegs@[#ldRegIdx])];
 
-          LETE stCap: Cap <- encodeCap (##aluOut`"multicycleOp"`"storeVal"`"ecap");
+          LetE stECap: ECap <- ##aluOut`"multicycleOp"`"storeVal"`"ecap";
+
+          LETE stCap: Cap <- encodeCap stECap;
           LetE stBits: Bit DXlen <- {< ToBit #stCap, ##aluOut`"multicycleOp"`"storeVal"`"addr" >};
+          LetE stBytes: Array (Z.to_nat DXlenBytes) (Bit 8) <- FromBit _ #stBits;
           LetE Store: Bool <- ##aluOut`"multicycleOp"`"Store";
 
-          LetE newMem: Array MemByteSz (Bit 8) <- #specMem
-                         @[Add [#memAddr; $7] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[63:56] #byte7]
-                         @[Add [#memAddr; $6] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[55:48] #byte6]
-                         @[Add [#memAddr; $5] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[47:40] #byte5]
-                         @[Add [#memAddr; $4] <- ITE (And [Eq #memSz $3; #Store]) #stBits`[39:32] #byte4]
-                         @[Add [#memAddr; $3] <- ITE (And [Sge #memSz $2; #Store]) #stBits`[31:24] #byte3]
-                         @[Add [#memAddr; $2] <- ITE (And [Sge #memSz $2; #Store]) #stBits`[23:16] #byte2]
-                         @[Add [#memAddr; $1] <- ITE (And [Sge #memSz $1; #Store]) #stBits`[15:8] #byte1]
-                         @[#memAddr <- ITE #Store #stBits`[7:0] #byte0];
+          LETE updMem <- updSlice #specMem #memAddr #stBytes #memSz;
 
+          LetE newMem <- ITE #Store #updMem #specMem;
           LetE newTags: Array Mem64Sz Bool <- #specTags
-                          @[#memTagAddr <- ITE (And [Eq #memSz $3; #Store]) (##aluOut`"multicycleOp"`"storeVal"`"tag") #ldTag];
+                                                @[#memTagAddr <- ITE (And [#isCap; #Store])
+                                                                   (##aluOut`"multicycleOp"`"storeVal"`"tag")
+                                                                   #ldTag];
 
           LetE newSpecState: SpecState <- STRUCT { "specMem" ::= #newMem;
                                                    "specTags" ::= #newTags;
@@ -167,8 +178,9 @@ Section Spec.
     Definition step: Action ty (getModLists specDecl) (Bit 0) :=
       ( RegRead specState <- "specState" in specLists;
         RegRead specInterrupts <- "specInterrupts" in specLists;
-        LetL updRegs : AllSpecState <- stepExpr (STRUCT { "specState" ::= #specState;
-                                                        "specInterrupts" ::= #specInterrupts });
+        Let fullState <- STRUCT { "specState" ::= #specState;
+                                  "specInterrupts" ::= #specInterrupts };
+        LetL updRegs : AllSpecState <- stepExpr fullState;
         Put "pcOut" in specLists <- ##specState`"specRegs" $[0]`"addr";
         RegWrite "specState" in specLists <- #updRegs`"specState";
         RegWrite "specInterrupts" in specLists <- ##updRegs`"specInterrupts";
