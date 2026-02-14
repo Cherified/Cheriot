@@ -311,7 +311,7 @@ Section Spec.
   End Ty.
 
   Definition spec: Mod := {|modDecl := specDecl;
-                            modActions := fun ty => [step ty; interrupts ty]|}.
+                            modActions := fun ty => [step ty; interrupts ty; revoker ty]|}.
 
   Definition RegsInvariant: FuncState (mregs specLists) -> Prop.
   Admitted.
@@ -328,9 +328,15 @@ Section Spec.
       SpecInvariant new.
   Admitted.
 
-  Theorem asyncInvariantPreserved: forall old new puts gets,
+  Theorem interruptsInvariantPreserved: forall old new puts gets,
       SpecInvariant old ->
-      SemAction (async type) old new puts gets Zmod.zero ->
+      SemAction (interrupts type) old new puts gets Zmod.zero ->
+      SpecInvariant new.
+  Admitted.
+
+  Theorem revokerInvariantPreserved: forall old new puts gets,
+      SpecInvariant old ->
+      SemAction (revoker type) old new puts gets Zmod.zero ->
       SpecInvariant new.
   Admitted.
 
