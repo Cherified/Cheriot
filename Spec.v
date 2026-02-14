@@ -13,17 +13,13 @@ Section Spec.
   Definition LgBytesFullCapSz := Eval compute in Z.to_nat LgNumBytesFullCapSz.
   Variable MemWidthGeLgBytesFullCapSz: MemWidth >= LgBytesFullCapSz.
   Definition MemByteSz := Nat.pow 2 MemWidth.
-  Definition Mem64Sz := Nat.pow 2 (MemWidth - LgBytesFullCapSz).
+  Definition MemFullCapSz := Nat.pow 2 (MemWidth - LgBytesFullCapSz).
   Definition switcherLength := Eval compute in (length switcher).
   Definition specInst: type (Array switcherLength (Bit 8)) := Build_SameTuple (tupleElems := switcher)
                                                                 (I: Is_true (length switcher =? switcherLength)).
-  Variable specMemR: type (Array MemByteSz (Bit 8)).
-  Variable specTagsR: type (Array Mem64Sz Bool).
-  Variable specRegsR: type (Array NumRegs FullECapWithTag).
-  Definition specWaits := Default (Array NumRegs Bool).
-  Variable specCsrsR: type Csrs.
-  Variable specScrsR: type Scrs.
-  Variable specInterruptsR: type Interrupts.
+  Variable memInit: type (Array MemByteSz (Bit 8)).
+  Definition waits := Default (Array NumRegs Bool).
+  Variable scrsInit: type Scrs.
 
   Variable RevStart: Z.
   Variable RevByteSz: Z.
@@ -44,44 +40,34 @@ Section Spec.
   Local Open Scope string_scope.
   Local Open Scope guru_scope.
 
-  Definition SpecState := STRUCT_TYPE {
-                              "specMem" :: Array MemByteSz (Bit 8) ;
-                              "specTags" :: Array Mem64Sz Bool ;
-                              "specRegs" :: Array NumRegs FullECapWithTag ;
-                              "specCsrs" :: Csrs ;
-                              "specScrs" :: Scrs }.
-
   Definition MemWidthCap : Z := Z.of_nat MemWidth - LgNumBytesFullCapSz.
 
-  Definition SpecRevokerState := STRUCT_TYPE {
-                                     "specRevokerEpoch" :: Data;
-                                     "specRevokerKick" :: Bool;
-                                     "specRevokerStart" :: Bit MemWidthCap;
-                                     "specRevokerEnd" :: Bit MemWidthCap }.
+  Definition specRegs := [("mem", Build_Reg _ memInit);
+                          ("tags", Build_Reg _ (Default (Array MemFullCapSz Bool)));
+                          ("regs", Build_Reg _ (Default (Array NumRegs FullECapWithTag)));
+                          ("csrs", Build_Reg _ (Default Csrs));
+                          ("scrs", Build_Reg _ scrsInit);
+                          ("interrupts", Build_Reg _ (Default Interrupts));
+                          ("revokerEpoch", Build_Reg _ (Default Data));
+                          ("revokerKick", Build_Reg _ (Default Bool));
+                          ("revokerStart", Build_Reg _ (Default (Bit MemWidthCap)));
+                          ("revokerEnd", Build_Reg _ (Default (Bit MemWidthCap)));
+                          ("revokeAddr", Build_Reg _ (Default (Bit MemWidthCap)))].
 
-  Definition specRevokerInit: type SpecRevokerState := STRUCT_CONST {
-                                                           "specRevokerEpoch" ::= Default Data;
-                                                           "specRevokerKick" ::= false;
-                                                           "specRevokerStart" ::= Default (Bit MemWidthCap);
-                                                           "specRevokerEnd" ::= Default (Bit MemWidthCap)
-                                                         }.
+  Definition SpecRevokerAccessState := STRUCT_TYPE {
+                                           "revokerEpoch" :: Data;
+                                           "revokerKick" :: Bool;
+                                           "revokerStart" :: Bit MemWidthCap;
+                                           "revokerEnd" :: Bit MemWidthCap }.
 
-  Definition AllSpecState := STRUCT_TYPE {
-                                 "specState" :: SpecState;
-                                 "specRevokerState" :: SpecRevokerState;
-                                 "specInterrupts" :: Interrupts }.
-
-  Definition specInit: type SpecState := STRUCT_CONST {
-                                             "specMem" ::= specMemR;
-                                             "specTags" ::= specTagsR;
-                                             "specRegs" ::= specRegsR;
-                                             "specCsrs" ::= specCsrsR;
-                                             "specScrs" ::= specScrsR }.
-
-  Definition specRegs := [("specState", Build_Reg _ specInit);
-                          ("specInterrupts", Build_Reg _ specInterruptsR);
-                          ("specRevoker", Build_Reg _ specRevokerInit);
-                          ("specRevokeAddr", Build_Reg _ (Default (Bit MemWidthCap)))].
+  Definition SpecProcessorState := STRUCT_TYPE {
+                                       "mem" :: Array MemByteSz (Bit 8);
+                                       "tags" :: Array MemFullCapSz Bool;
+                                       "regs" :: Array NumRegs FullECapWithTag;
+                                       "csrs" :: Csrs;
+                                       "scrs" :: Scrs;
+                                       "interrupts" :: Interrupts;
+                                       "revokerAccess" :: SpecRevokerAccessState }.
 
   Definition specDecl: ModDecl := {|modRegs := specRegs;
                                     modMems := nil;
@@ -120,13 +106,14 @@ Section Spec.
       TruncMsb (Z.log2_up RevokerSize) (Z.log2_up XlenBytes)
         (TruncLsb (AddrSz - LgRevokerSzBytes) LgRevokerSzBytes (Sub #a RevokerEpochAddr)).
 
-    Definition readRevoker (offset: ty (Bit (Z.log2_up RevokerSize))) (revokerState: ty SpecRevokerState):
+    Definition readRevoker (offset: ty (Bit (Z.log2_up RevokerSize))) (revokerState: ty SpecRevokerAccessState):
       Expr ty Data :=
-      (Or [ITE0 (Eq #offset $0) ##revokerState`"specRevokerEpoch";
+      (Or [ITE0 (Eq #offset $0) ##revokerState`"revokerEpoch";
+           ITE0 (Eq #offset $1) (Const ty Data (bits.of_Z _ 0));
            ITE0 (Eq #offset $2) (castBits (Zplus_minus _ _)
-                                   (ZeroExtendTo AddrSz ##revokerState`"specRevokerStart"));
+                                   (ZeroExtendTo AddrSz ##revokerState`"revokerStart"));
            ITE0 (Eq #offset $3) (castBits (Zplus_minus _ _)
-                                   (ZeroExtendTo AddrSz ##revokerState`"specRevokerEnd"))]).
+                                   (ZeroExtendTo AddrSz ##revokerState`"revokerEnd"))]).
 
     Definition getRevokerAddr (a: ty Addr): Expr ty (Bit MemWidthCap).
       refine
@@ -136,17 +123,17 @@ Section Spec.
       - abstract (unfold AddrSz; lia).
     Defined.
 
-    Definition writeRevoker (offset: ty (Bit (Z.log2_up RevokerSize))) (d: ty Data) (old: ty SpecRevokerState)
-      : Expr ty SpecRevokerState :=
+    Definition writeRevoker (offset: ty (Bit (Z.log2_up RevokerSize))) (d: ty Data) (old: ty SpecRevokerAccessState)
+      : Expr ty SpecRevokerAccessState :=
       STRUCT {
-          "specRevokerEpoch" ::= ITE (Eq #offset $0) #d ##old`"specRevokerEpoch";
-          "specRevokerKick" ::= Eq #offset $1;
-          "specRevokerStart" ::= ITE (Eq #offset $2) (getRevokerAddr d) #old`"specRevokerStart";
-          "specRevokerEnd" ::= ITE (Eq #offset $3) (getRevokerAddr d) #old`"specRevokerEnd"
+          "revokerEpoch" ::= ITE (Eq #offset $0) #d ##old`"revokerEpoch";
+          "revokerKick" ::= Eq #offset $1;
+          "revokerStart" ::= ITE (Eq #offset $2) (getRevokerAddr d) #old`"revokerStart";
+          "revokerEnd" ::= ITE (Eq #offset $3) (getRevokerAddr d) #old`"revokerEnd"
         }.
 
     Section LetExpr.
-      Variable state: ty AllSpecState.
+      Variable state: ty SpecProcessorState.
 
       Ltac specSimpl x :=
         (let y := eval cbv [getFinStruct structList arraySize fieldK forceOption getFinStructOption length
@@ -155,30 +142,30 @@ Section Spec.
 
       Notation specSimpl x := ltac:(specSimpl x) (only parsing).
 
-      Definition stepExpr: LetExpr ty AllSpecState := specSimpl
-        ( LetE specInst : Array switcherLength (Bit 8) <- Const ty _ specInst;
-          LetE specMem <- ##state`"specState"`"specMem";
-          LetE specTags <- ##state`"specState"`"specTags";
-          LetE specRegs <- ##state`"specState"`"specRegs";
-          LetE specCsrs <- ##state`"specState"`"specCsrs";
-          LetE specScrs <- ##state`"specState"`"specScrs";
-          LetE specRevoker <- ##state`"specRevokerState";
-          LetE specInterrupts <- ##state`"specInterrupts";
-          LetE pcc : FullECapWithTag <- #specRegs $[ 0 ];
+      Definition stepExpr: LetExpr ty SpecProcessorState := specSimpl
+        ( LetE insts : Array switcherLength (Bit 8) <- Const ty _ specInst;
+          LetE mem <- ##state`"mem";
+          LetE tags <- ##state`"tags";
+          LetE regs <- ##state`"regs";
+          LetE csrs <- ##state`"csrs";
+          LetE scrs <- ##state`"scrs";
+          LetE interrupts <- ##state`"interrupts";
+          LetE revoker <- ##state`"revokerAccess";
+          LetE pcc : FullECapWithTag <- #regs $[ 0 ];
           LetE pcVal : Addr <- #pcc`"addr";
           LetE BoundsException : Bool <- And [Slt (ZeroExtend 1 #pcVal) (##pcc`"ecap"`"top")];
           LetE pcAluOut: PcAluOut <- STRUCT { "pcVal" ::= #pcVal;
                                               "BoundsException" ::= #BoundsException };
-          LetE inst: Inst <- ToBit (slice #specInst #pcVal (Z.to_nat InstSz/8));
+          LetE inst: Inst <- ToBit (slice #insts #pcVal (Z.to_nat InstSz/8));
           LETE decodeOut: DecodeOut <- decode inst;
           
           LetE aluIn: AluIn <- STRUCT { "pcAluOut" ::= #pcAluOut;
                                         "decodeOut" ::= #decodeOut;
-                                        "regs" ::= #specRegs;
-                                        "waits" ::= Const ty _ specWaits;
-                                        "csrs" ::= #specCsrs;
-                                        "scrs" ::= #specScrs;
-                                        "interrupts" ::= #specInterrupts };
+                                        "regs" ::= #regs;
+                                        "waits" ::= Const ty _ waits;
+                                        "csrs" ::= #csrs;
+                                        "scrs" ::= #scrs;
+                                        "interrupts" ::= #interrupts };
           LetE pcTag <- #pcc`"tag";
           LetE pcCap <- #pcc`"ecap";
           LETE aluOut: AluOut <- alu pcTag pcCap aluIn;
@@ -189,9 +176,9 @@ Section Spec.
 
           LetE isRevoker: Bool <- isRevokerAddr memAddr memSz;
           LetE revokerOffset: Bit (Z.log2_up RevokerSize) <- getRevokerOffset memAddr;
-          LetE revokerData: Data <- readRevoker revokerOffset specRevoker;
+          LetE revokerData: Data <- readRevoker revokerOffset revoker;
 
-          LetE bytes: Array _ (Bit 8) <- slice #specMem #memAddr (Z.to_nat DXlenBytes);
+          LetE bytes: Array _ (Bit 8) <- slice #mem #memAddr (Z.to_nat DXlenBytes);
           LetE fullCap <- FromBit FullCap (ToBit #bytes);
           LetE ldCap: Cap <- #fullCap`"cap";
           LetE ldVal <- FromBit (Array (Z.to_nat XlenBytes) (Bit 8)) (ITE #isRevoker #revokerData #fullCap`"addr");
@@ -199,9 +186,9 @@ Section Spec.
           LETE ldECap: ECap <- decodeCap ldCap ldValFinal;
           LetE ldECapFinal: ECap <- ITE #isCap #ldECap ConstDef;
           LetE memTagAddr: Bit (AddrSz - MemSz) <- TruncMsb _ MemSz #memAddr;
-          LetE ldTag: Bool <- #specTags@[#memTagAddr];
+          LetE ldTag: Bool <- #tags@[#memTagAddr];
           LetE ldBase: Bit (AddrSz + 1) <- #ldECap`"base";
-          LetE revByte: Array 8 Bool <- FromBit (Array 8 Bool) #specMem@[revBitByteAddr ldBase];
+          LetE revByte: Array 8 Bool <- FromBit (Array 8 Bool) #mem@[revBitByteAddr ldBase];
           LetE revBit: Bool <- #revByte@[revBitByteOffset ldBase];
           LetE ldTagFinal: Bool <- ITE #isCap (And [#ldTag; Not #revBit]) ConstDef;
           LetE ldFinal: FullECapWithTag <- STRUCT { "tag" ::= #ldTagFinal;
@@ -223,90 +210,138 @@ Section Spec.
           LetE stBytes: Array (Z.to_nat DXlenBytes) (Bit 8) <- FromBit _ #stBits;
           LetE Store: Bool <- ##aluOut`"multicycleOp"`"Store";
           LetE StoreMem: Bool <- And [#Store; Not #isRevoker];
-          LetE newSpecRevoker <- ITE (And [#Store; #isRevoker])
-                                   (writeRevoker revokerOffset stVal specRevoker)
-                                   #specRevoker;
+          LetE newRevoker <- ITE (And [#Store; #isRevoker])
+                                   (writeRevoker revokerOffset stVal revoker)
+                                   #revoker;
 
-          LETE updMem <- updSlice #specMem #memAddr #stBytes #memSz;
+          LETE updMem <- updSlice #mem #memAddr #stBytes #memSz;
 
-          LetE newMem <- ITE #StoreMem #updMem #specMem;
-          LetE newTags: Array Mem64Sz Bool <- #specTags
-                                                @[#memTagAddr <- ITE (And [#isCap; #StoreMem])
-                                                                   (##aluOut`"multicycleOp"`"storeVal"`"tag")
-                                                                   #ldTag];
+          LetE newMem <- ITE #StoreMem #updMem #mem;
+          LetE newTags: Array MemFullCapSz Bool <- #tags
+                                                     @[#memTagAddr <- ITE (And [#isCap; #StoreMem])
+                                                                        (##aluOut`"multicycleOp"`"storeVal"`"tag")
+                                                                        #ldTag];
 
-          LetE newSpecState: SpecState <- STRUCT { "specMem" ::= #newMem;
-                                                   "specTags" ::= #newTags;
-                                                   "specRegs" ::= #newRegs;
-                                                   "specCsrs" ::= #aluOut`"csrs";
-                                                   "specScrs" ::= ##aluOut`"scrs" };
-          @RetE _ AllSpecState (STRUCT { "specState" ::= #newSpecState;
-                                         "specRevokerState" ::= #newSpecRevoker;
-                                         "specInterrupts" ::= ##aluOut`"interrupts" })).
+          @RetE _ SpecProcessorState (STRUCT { "mem" ::= #newMem;
+                                               "tags" ::= #newTags;
+                                               "regs" ::= #newRegs;
+                                               "csrs" ::= #aluOut`"csrs";
+                                               "scrs" ::= ##aluOut`"scrs";
+                                               "interrupts" ::= ##aluOut`"interrupts";
+                                               "revokerAccess" ::= #newRevoker })).
     End LetExpr.
-
-    Definition step: Action ty (getModLists specDecl) (Bit 0) :=
-      ( RegRead specState <- "specState" in specLists;
-        RegRead specRevokerState <- "specRevoker" in specLists;
-        RegRead specInterrupts <- "specInterrupts" in specLists;
-        Let fullState: AllSpecState <- STRUCT { "specState" ::= #specState;
-                                                "specRevokerState" ::= #specRevokerState;
-                                                "specInterrupts" ::= #specInterrupts };
-        LetL updRegs : AllSpecState <- stepExpr fullState;
-        Put "pcOut" in specLists <- ##specState`"specRegs" $[0]`"addr";
-        RegWrite "specState" in specLists <- #updRegs`"specState";
-        RegWrite "specRevoker" in specLists <- ##updRegs`"specRevokerState";
-        RegWrite "specInterrupts" in specLists <- ##updRegs`"specInterrupts";
-        Retv ).
 
     Definition interrupts: Action ty (getModLists specDecl) (Bit 0) :=
       ( Get interrupts <- "interrupts" in specLists;
-        RegRead specInterrupts <- "specInterrupts" in specLists;
-        RegWrite "specInterrupts" in specLists <- Or [#interrupts; #specInterrupts];
+        RegRead specInterrupts <- "interrupts" in specLists;
+        RegWrite "interrupts" in specLists <- Or [#interrupts; #specInterrupts];
         Retv ).
 
+    Definition step: Action ty (getModLists specDecl) (Bit 0) :=
+      ( RegRead mem <- "mem" in specLists;
+        RegRead tags <- "tags" in specLists;
+        RegRead regs <- "regs" in specLists;
+        RegRead csrs <- "csrs" in specLists;
+        RegRead scrs <- "scrs" in specLists;
+        RegRead interrupts <- "interrupts" in specLists;
+        RegRead revokerEpoch <- "revokerEpoch" in specLists;
+        RegRead revokerKick <- "revokerKick" in specLists;
+        RegRead revokerStart <- "revokerStart" in specLists;
+        RegRead revokerEnd <- "revokerEnd" in specLists;
+
+        Let revoker : SpecRevokerAccessState <- STRUCT { "revokerEpoch" ::= #revokerEpoch;
+                                                         "revokerKick" ::= #revokerKick;
+                                                         "revokerStart" ::= #revokerStart;
+                                                         "revokerEnd" ::= #revokerEnd };
+        Let fullState: SpecProcessorState <- STRUCT { "mem" ::= #mem;
+                                                      "tags" ::= #tags;
+                                                      "regs" ::= #regs;
+                                                      "csrs" ::= #csrs;
+                                                      "scrs" ::= #scrs;
+                                                      "interrupts" ::= #interrupts;
+                                                      "revokerAccess" ::= #revoker };
+        LetL updRegs : SpecProcessorState <- stepExpr fullState;
+
+        Put "pcOut" in specLists <- #regs $[0]`"addr";
+
+        RegWrite "mem" in specLists <- #updRegs`"mem";
+        RegWrite "tags" in specLists <- ##updRegs`"tags";
+        RegWrite "regs" in specLists <- ##updRegs`"regs";
+        RegWrite "csrs" in specLists <- ##updRegs`"csrs";
+        RegWrite "scrs" in specLists <- ##updRegs`"scrs";
+        RegWrite "interrupts" in specLists <- ##updRegs`"interrupts";
+        RegWrite "revokerEpoch" in specLists <- ##updRegs`"revokerAccess"`"revokerEpoch";
+        RegWrite "revokerKick" in specLists <- ##updRegs`"revokerAccess"`"revokerKick";
+        RegWrite "revokerStart" in specLists <- ##updRegs`"revokerAccess"`"revokerStart";
+        RegWrite "revokerEnd" in specLists <- ##updRegs`"revokerAccess"`"revokerEnd";
+        Retv ).
+
+    Definition RevokerUpdState := STRUCT_TYPE {
+                                      "tags" :: Array MemFullCapSz Bool;
+                                      "revokerEpoch" :: Data;
+                                      "revokerKick" :: Bool;
+                                      "revokeAddr" :: Bit MemWidthCap }.
+
+    Section LetExpr.
+      Variable mem: ty (Array MemByteSz (Bit 8)).
+      Variable revokerStart: ty (Bit MemWidthCap).
+      Variable revokerEnd: ty (Bit MemWidthCap).
+      Variable revokerUpdState: ty RevokerUpdState.
+
+      Definition revokerExpr: LetExpr ty RevokerUpdState :=
+        ( LetE tags <- #revokerUpdState`"tags";
+          LetE revokerEpoch <- #revokerUpdState`"revokerEpoch";
+          LetE revokerKick <- #revokerUpdState`"revokerKick";
+          LetE revokeAddr <- #revokerUpdState`"revokeAddr";
+          LetE ldTag <- #tags@[#revokeAddr];
+          LetE bytes <- slice #mem {< #revokeAddr, ConstBit (bits.of_Z MemSz 0) >} (Z.to_nat DXlenBytes);
+          LetE fullCap <- FromBit FullCap (ToBit #bytes);
+          LetE ldCap <- #fullCap`"cap";
+          LetE ldVal <- #fullCap`"addr";
+          LETE ldECap: ECap <- decodeCap ldCap ldVal;
+          LetE ldBase <- #ldECap`"base";
+          LetE revByte: Array 8 Bool <- FromBit (Array 8 Bool) #mem@[revBitByteAddr ldBase];
+          LetE revBit: Bool <- #revByte@[revBitByteOffset ldBase];
+          LetE ldTagFinal <- And [#ldTag; Not #revBit];
+          LetE newTags: Array MemFullCapSz Bool <- #tags@[#revokeAddr <- #ldTagFinal];
+
+          LetE workStart <- And [Eq ##revokeAddr ##revokerEnd; #revokerKick];
+          LetE doWork <- Slt #revokeAddr #revokerEnd;
+          LetE incRevokeAddr <- Add [#revokeAddr; $1];
+          LetE newRevokeAddr <- ITE #workStart
+                                  #revokerStart
+                                  (ITE #doWork
+                                     #incRevokeAddr
+                                     #revokeAddr);
+          LetE newEpoch <- Add [#revokerEpoch; ITE (Or [Eq #incRevokeAddr #revokerEnd; #workStart]) $1 $0];
+
+          @RetE _ RevokerUpdState (STRUCT { "tags" ::= #newTags;
+                                            "revokerEpoch" ::= #newEpoch;
+                                            "revokerKick" ::= Const ty Bool false;
+                                            "revokeAddr" ::= #newRevokeAddr })
+        ).
+    End LetExpr.
+
     Definition revoker: Action ty (getModLists specDecl) (Bit 0) :=
-      ( RegRead specState <- "specState" in specLists;
-        RegRead specRevoker <- "specRevoker" in specLists;
-        RegRead specRevokeAddr <- "specRevokeAddr" in specLists;
-        Let specRevokerEpoch <- #specRevoker`"specRevokerEpoch";
-        Let specRevokerKick <- #specRevoker`"specRevokerKick";
-        Let specRevokerStart <- #specRevoker`"specRevokerStart";
-        Let specRevokerEnd <- #specRevoker`"specRevokerEnd";
-        Let specMem <- #specState`"specMem";
-        Let specTags <- #specState`"specTags";
-        Let ldTag <- #specTags@[#specRevokeAddr];
-        Let bytes <- slice #specMem {< #specRevokeAddr, ConstBit (bits.of_Z MemSz 0) >} (Z.to_nat DXlenBytes);
-        Let fullCap <- FromBit FullCap (ToBit #bytes);
-        Let ldCap <- #fullCap`"cap";
-        Let ldVal <- #fullCap`"addr";
-        LetL ldECap: ECap <- decodeCap ldCap ldVal;
-        Let ldBase <- #ldECap`"base";
-        Let revByte: Array 8 Bool <- FromBit (Array 8 Bool) #specMem@[revBitByteAddr ldBase];
-        Let revBit: Bool <- #revByte@[revBitByteOffset ldBase];
-        Let ldTagFinal <- And [#ldTag; Not #revBit];
-        Let newTags: Array Mem64Sz Bool <- #specTags@[#specRevokeAddr <- #ldTagFinal];
+      ( RegRead mem <- "mem" in specLists;
+        RegRead tags <- "tags" in specLists;
+        RegRead revokerEpoch <- "revokerEpoch" in specLists;
+        RegRead revokerKick <- "revokerKick" in specLists;
+        RegRead revokerStart <- "revokerStart" in specLists;
+        RegRead revokerEnd <- "revokerEnd" in specLists;
+        RegRead revokeAddr <- "revokeAddr" in specLists;
 
-        Let workStart <- And [Eq #specRevokeAddr #specRevokerEnd; #specRevokerKick];
-        Let doWork <- Slt #specRevokeAddr #specRevokerEnd;
-        Let incSpecRevokeAddr <- Add [#specRevokeAddr; $1];
-        Let newSpecRevokeAddr <- ITE #workStart
-                                   #specRevokerStart
-                                   (ITE #doWork
-                                      #incSpecRevokeAddr
-                                      #specRevokeAddr);
+        Let revokerUpdState: RevokerUpdState <- STRUCT { "tags" ::= #tags;
+                                                         "revokerEpoch" ::= #revokerEpoch;
+                                                         "revokerKick" ::= #revokerKick;
+                                                         "revokeAddr" ::= #revokeAddr };
 
-        Let newEpoch <- Add [#specRevokerEpoch; ITE (Or [Eq #incSpecRevokeAddr #specRevokerEnd; #workStart]) $1 $0];
-        RegWrite "specState" in specLists <- STRUCT { "specMem" ::= #specState`"specMem";
-                                                      "specTags" ::= #newTags;
-                                                      "specRegs" ::= #specState`"specRegs";
-                                                      "specCsrs" ::= #specState`"specCsrs";
-                                                      "specScrs" ::= #specState`"specScrs" };
-        RegWrite "specRevoker" in specLists <- STRUCT { "specRevokerEpoch" ::= #newEpoch;
-                                                        "specRevokerKick" ::= Const ty Bool false;
-                                                        "specRevokerStart" ::= #specRevokerStart;
-                                                        "specRevokerEnd" ::= #specRevokerEnd };
-        RegWrite "specRevokeAddr" in specLists <- #newSpecRevokeAddr;
+        LetL newRevokerUpdState <- revokerExpr mem revokerStart revokerEnd revokerUpdState;
+
+        RegWrite "tags" in specLists <- #newRevokerUpdState`"tags";
+        RegWrite "revokerEpoch" in specLists <- ##newRevokerUpdState`"revokerEpoch";
+        RegWrite "revokerKick" in specLists <- ##newRevokerUpdState`"revokerKick";
+        RegWrite "revokeAddr" in specLists <- ##newRevokerUpdState`"revokeAddr";
         Retv ).
   End Ty.
 
