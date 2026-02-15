@@ -17,9 +17,19 @@ Section Spec.
   Definition switcherLength := Eval compute in (length switcher).
   Definition specInst: type (Array switcherLength (Bit 8)) := Build_SameTuple (tupleElems := switcher)
                                                                 (I: Is_true (length switcher =? switcherLength)).
+  Definition MemWidthCap : Z := Z.of_nat MemWidth - LgNumBytesFullCapSz.
+
   Variable memInit: type (Array MemByteSz (Bit 8)).
-  Definition waits := Default (Array NumRegs Bool).
+  Variable tagsInit: type (Array MemFullCapSz Bool).
+  Variable regsInit: type (Array NumRegs FullECapWithTag).
+  Variable csrsInit: type Csrs.
   Variable scrsInit: type Scrs.
+  Variable interruptsInit: type Interrupts.
+  Variable revokerEpochInit: type Data.
+  Variable revokerKickInit: type Bool.
+  Variable revokerStartInit: type (Bit MemWidthCap).
+  Variable revokerEndInit: type (Bit MemWidthCap).
+  Variable revokeAddrInit: type (Bit MemWidthCap).
 
   Variable RevStart: Z.
   Variable RevByteSz: Z.
@@ -40,19 +50,18 @@ Section Spec.
   Local Open Scope string_scope.
   Local Open Scope guru_scope.
 
-  Definition MemWidthCap : Z := Z.of_nat MemWidth - LgNumBytesFullCapSz.
 
   Definition specRegs := [("mem", Build_Reg _ memInit);
-                          ("tags", Build_Reg _ (Default (Array MemFullCapSz Bool)));
-                          ("regs", Build_Reg _ (Default (Array NumRegs FullECapWithTag)));
-                          ("csrs", Build_Reg _ (Default Csrs));
+                          ("tags", Build_Reg _ tagsInit);
+                          ("regs", Build_Reg _ regsInit);
+                          ("csrs", Build_Reg _ csrsInit);
                           ("scrs", Build_Reg _ scrsInit);
-                          ("interrupts", Build_Reg _ (Default Interrupts));
-                          ("revokerEpoch", Build_Reg _ (Default Data));
-                          ("revokerKick", Build_Reg _ (Default Bool));
-                          ("revokerStart", Build_Reg _ (Default (Bit MemWidthCap)));
-                          ("revokerEnd", Build_Reg _ (Default (Bit MemWidthCap)));
-                          ("revokeAddr", Build_Reg _ (Default (Bit MemWidthCap)))].
+                          ("interrupts", Build_Reg _ interruptsInit);
+                          ("revokerEpoch", Build_Reg _ revokerEpochInit);
+                          ("revokerKick", Build_Reg _ revokerKickInit);
+                          ("revokerStart", Build_Reg _ revokerStartInit);
+                          ("revokerEnd", Build_Reg _ revokerEndInit);
+                          ("revokeAddr", Build_Reg _ revokeAddrInit)].
 
   Definition SpecRevokerAccessState := STRUCT_TYPE {
                                            "revokerEpoch" :: Data;
@@ -162,7 +171,7 @@ Section Spec.
           LetE aluIn: AluIn <- STRUCT { "pcAluOut" ::= #pcAluOut;
                                         "decodeOut" ::= #decodeOut;
                                         "regs" ::= #regs;
-                                        "waits" ::= Const ty _ waits;
+                                        "waits" ::= Const ty (Array NumRegs Bool) (Default _);
                                         "csrs" ::= #csrs;
                                         "scrs" ::= #scrs;
                                         "interrupts" ::= #interrupts };
