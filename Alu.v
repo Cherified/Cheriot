@@ -389,16 +389,7 @@ Section Cap.
   Section CalculateBounds.
     Variable base: Expr ty (Bit (AddrSz + 1)).
     Variable length: Expr ty (Bit (AddrSz + 1)).
-    Variable IsSubset: Expr ty Bool.
-    Variable IsFixedBase: Expr ty Bool.
-
-    Local Notation shift_m_e sm m e :=
-      (ITE (FromBit Bool (TruncMsb 1 sm m))
-         ((STRUCT { "fst" ::= Add [TruncMsb sm 1 m; ZeroExtendTo sm (TruncLsb sm 1 m)];
-                    "snd" ::= Add [e; $1] }) : Expr ty (Pair (Bit sm) (Bit ExpSz)))
-         ((STRUCT { "fst" ::= TruncLsb 1 sm m;
-                    "snd" ::= e }) : Expr ty (Pair (Bit sm) (Bit ExpSz))))
-        (sm in scope Z_scope, m in scope guru_scope, only parsing).
+    Variable IsRoundDown: Expr ty Bool.
 
     Definition Bounds :=
       STRUCT_TYPE {
@@ -408,54 +399,65 @@ Section Cap.
           "length" :: Bit (AddrSz + 1);
           "exact" :: Bool }.
 
+    Local Notation shift_m_e sm m e :=
+      (ITE (FromBit Bool (TruncMsb 1 sm m))
+         ((STRUCT { "fst" ::= Add [TruncMsb sm 1 m; ZeroExtendTo sm (TruncLsb sm 1 m)];
+                    "snd" ::= Add [e; $1] }) : Expr ty (Pair (Bit sm) (Bit ExpSz)))
+         ((STRUCT { "fst" ::= TruncLsb 1 sm m;
+                    "snd" ::= e }) : Expr ty (Pair (Bit sm) (Bit ExpSz))))
+        (sm in scope Z_scope, m in scope guru_scope, only parsing).
+
     (* TODO check when length = 2^32-1 and base = 2^32-1 *)
     Definition calculateBounds : LetExpr ty Bounds := structSimplCbn
       ( LetE lenTrunc : Bit (AddrSz + 1 - CapBSz) <- TruncMsb (AddrSz + 1 - CapBSz) CapBSz length;
-        LetE eInit: Bit ExpSz <-
-                      Add [$(AddrSz + 1 - CapBSz);
-                           Not (countLeadingZerosArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) _)];
-        LetE e_lgCeilAdd1: Bool <-
-                             Or [isNotZero (TruncLsb (AddrSz + 1 - CapBSz) CapBSz length);
-                                 (Neq (countOnesArray (mkBoolArray (AddrSz + 1 - CapBSz)
-                                                         (Add [#lenTrunc; $1])) ExpSz) $1)];
-        LetE eLength: Bit ExpSz <-
-                        Add [#eInit; ZeroExtendTo ExpSz (ToBit (ITE IsSubset (isZero #lenTrunc) #e_lgCeilAdd1))];
-        LetE eBaseUncorrected : Bit (Z.log2_up (AddrSz + 1)) <-
-                                  countTrailingZerosArray (mkBoolArray (AddrSz + 1) base) _;
-        LetE eBase : Bit ExpSz <- TruncLsb 1 ExpSz (ITE (Sge #eBaseUncorrected $Emax) $Emax #eBaseUncorrected);
-        LetE fixedBase_eBase_lt_eLength : Bool <- And [IsFixedBase; Slt #eBase #eLength];
-        LetE e: Bit ExpSz <- ITE #fixedBase_eBase_lt_eLength #eBase #eLength;
+        LetE e: Bit ExpSz <- Add [$(AddrSz + 2 - CapBSz);
+                                  Not (countLeadingZerosArray (mkBoolArray (AddrSz + 1 - CapBSz) #lenTrunc) _)];
+        (* e is such that
+             if length <  2^CapBSz, then e = 0
+             if length >= 2^CapBSz, then 2^e > (length/2^CapBSz) >= 2^(e-1)
+               In this case, it is true that 2^CapBSz > length/2^e >= 2^(CapBSz-1)
+           Thus e is a suitable canonical exponent with mantissa = floor(length/2^e).
+           For normal CSetBounds, the only complication is if
+             base is not aligned to 2^e or if input length is less than
+                floor(length/2^e)*2^CapBSz, i.e. input length is not aligned to 2^CapBSz.
+             This part is complicated.
+           For CSetBoundsRoundDown, we need to find the alignment of base, i.e., let base = b*2^e_b.
+             If e_b < e, then the final exponent is e_b. We cannot represent the length anymore in the mantissa.
+             So we use the max length of 2^CapBSz-1.
+         *)
         LetE mask_e : Bit (AddrSz + 2 - CapBSz) <- Not (Sll (ConstBit (Zmod.of_Z _ (-1))) #e);
         LetE base_mod_e : Bit (AddrSz + 2 - CapBSz) <-
                             And [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) base; #mask_e];
         LetE length_mod_e : Bit (AddrSz + 2 - CapBSz) <-
                               And [TruncLsb (CapBSz - 1) (AddrSz + 2 - CapBSz) length; #mask_e];
+
         LetE sum_mod_e : Bit (AddrSz + 2 - CapBSz) <- Add [#base_mod_e; #length_mod_e];
         LetE iFloor : Bit 2 <- TruncLsb (AddrSz - CapBSz) 2 (Srl #sum_mod_e #e);
         LetE lost_sum : Bool <- isNotZero (And [#sum_mod_e; #mask_e]);
         LetE iCeil : Bit 2 <- Add [#iFloor; ZeroExtendTo 2 (ToBit #lost_sum)];
         LetE d : Bit (CapBSz + 1) <- TruncLsb (AddrSz - CapBSz) (CapBSz + 1) (Srl length #e);
-        LetE m : Bit (CapBSz + 1) <- Add [ITE #fixedBase_eBase_lt_eLength $(Z.shiftl 1 CapMSz - 1) #d;
-                                            ZeroExtend (CapBSz-1) (ITE IsSubset $0 #iCeil)];
+        LetE m : Bit (CapBSz + 1) <- Add [#d; ZeroExtend (CapBSz-1) #iCeil];
         LetE m1e1: Pair (Bit CapBSz) (Bit ExpSz) <- shift_m_e CapBSz #m #e;
-        LetE mf: Bit CapBSz <- #m1e1`"fst";
+        LetE m_normal: Bit CapBSz <- #m1e1`"fst";
         LetE efUnsat: Bit ExpSz <- #m1e1`"snd";
         LetE isESaturated: Bool <- Sgt #efUnsat $(AddrSz + 1 - CapBSz);
-        LetE ef: Bit ExpSz <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
-        LetE cram : Bit (AddrSz + 1) <- Sll (ConstBit (Zmod.of_Z _ (-1))) #ef;
-        LetE mask_ef : Bit (AddrSz + 1) <- Not #cram;
-        LetE lost_base : Bool <- isNotZero (And [base; #mask_ef]);
+        LetE e_normal: Bit ExpSz <- ITE #isESaturated $(AddrSz + 1 - CapBSz) #efUnsat;
+
+        LetE e_b: Bit ExpSz <- countTrailingZerosArray (mkBoolArray (AddrSz + 1) base) _;
+        LetE pick_b: Bool <- Slt #e_b #e;
+        LetE e_roundDown: Bit ExpSz <- ITE #pick_b #e_b #e;
+        LetE m_roundDown: Bit CapBSz <- ITE #pick_b (Const ty _ (InvDefault _)) (TruncLsb 1 CapBSz #d);
+
+        LetE ef: Bit ExpSz <- ITE IsRoundDown #e_roundDown #e_normal;
+        LetE cram: Bit (AddrSz + 1) <- Sll (ConstBit (Zmod.of_Z _ (-1))) #ef;
         LetE outBase : Bit (AddrSz + 1) <-  And [base; #cram];
-        (* TODO for subset without fixed base.
-           + (ZeroExtend Xlen (pack (IsSubset && #lost_base &&
-           !(#isESaturated && ((base .& #cram) == #cram))))) << #ef *)
-        LetE outLength: Bit (AddrSz + 1) <- Sll (ZeroExtendTo (AddrSz + 1) ##mf) #ef;
+        LetE outLen: Bit (AddrSz + 1) <- Sll (ZeroExtendTo (AddrSz + 1) (ITE IsRoundDown #m_roundDown #m_normal)) #ef;
         @RetE _ Bounds (STRUCT {
                             "E" ::= #ef;
                             "cram" ::= #cram;
                             "base" ::= #outBase;
-                            "length" ::= #outLength;
-                            "exact" ::= Or [#lost_base; Neq length #outLength] })).
+                            "length" ::= #outLen;
+                            "exact" ::= Or [isNotZero #base_mod_e; isNotZero #length_mod_e] })).
   End CalculateBounds.
 
   Section EncodeCap.
@@ -565,8 +567,7 @@ Definition DecodeOut :=
           "LoadUnsigned" :: Bool ;
              "SetBounds" :: Bool ;
         "SetBoundsExact" :: Bool ;
-          "BoundsSubset" :: Bool ;
-       "BoundsFixedBase" :: Bool ;
+       "BoundsRoundDown" :: Bool ;
    
            "CChangeAddr" :: Bool ;
                 "AuiPcc" :: Bool ;
@@ -786,8 +787,7 @@ Section Decode.
       LetE  SrAll: Bool <- Or [#SrlI; #SraI; #SrlOp; #SraOp];
       LetE SetBounds: Bool <- Or [#CSetBounds; #CSetBoundsExact; #CSetBoundsImm; #CSetBoundsRoundDown];
       LetE SetBoundsExact: Bool <- #CSetBoundsExact;
-      LetE BoundsSubset: Bool <- #CSetBoundsRoundDown;
-      LetE BoundsFixedBase: Bool <- #CSetBoundsRoundDown;
+      LetE BoundsRoundDown: Bool <- #CSetBoundsRoundDown;
 
       LetE CChangeAddr: Bool <- Or [#CIncAddr; #CIncAddrImm; #CSetAddr; #AuiPcc];
       
@@ -874,8 +874,7 @@ Section Decode.
             "LoadUnsigned" ::= #LoadUnsigned ;
                "SetBounds" ::= #SetBounds ;
           "SetBoundsExact" ::= #SetBoundsExact ;
-            "BoundsSubset" ::= #BoundsSubset ;
-         "BoundsFixedBase" ::= #BoundsFixedBase ;
+         "BoundsRoundDown" ::= #BoundsRoundDown ;
         
              "CChangeAddr" ::= #CChangeAddr ;
                   "AuiPcc" ::= #AuiPcc ;
@@ -972,8 +971,7 @@ Section Decode.
             "LoadUnsigned" ::= ConstTBool false ;
                "SetBounds" ::= ConstTBool false ;
           "SetBoundsExact" ::= ConstTBool false ;
-            "BoundsSubset" ::= ConstTBool false ;
-         "BoundsFixedBase" ::= ConstTBool false ;
+         "BoundsRoundDown" ::= ConstTBool false ;
        
              "CChangeAddr" ::= #CIncAddrImm ;
                   "AuiPcc" ::= ConstTBool false ;
@@ -1112,8 +1110,7 @@ Section Decode.
             "LoadUnsigned" ::= ConstTBool false ;
                "SetBounds" ::= ConstTBool false ;
           "SetBoundsExact" ::= ConstTBool false ;
-            "BoundsSubset" ::= ConstTBool false ;
-         "BoundsFixedBase" ::= ConstTBool false ;
+         "BoundsRoundDown" ::= ConstTBool false ;
        
              "CChangeAddr" ::= #CIncAddrImm ;
                   "AuiPcc" ::= ConstTBool false ;
@@ -1225,8 +1222,7 @@ Section Decode.
                      "LoadUnsigned" ::= ConstTBool false ;
                         "SetBounds" ::= ConstTBool false ;
                    "SetBoundsExact" ::= ConstTBool false ;
-                     "BoundsSubset" ::= ConstTBool false ;
-                  "BoundsFixedBase" ::= ConstTBool false ;
+                  "BoundsRoundDown" ::= ConstTBool false ;
               
                       "CChangeAddr" ::= ConstTBool false ;
                            "AuiPcc" ::= ConstTBool false ;
@@ -1293,112 +1289,111 @@ Section Alu.
 
   Variable aluIn : ty AluIn.
 
-  Local Notation           pcAluOut := (##aluIn`"pcAluOut" : Expr ty PcAluOut ).
-  Local Notation              pcVal := (pcAluOut`"pcVal" : Expr ty Addr ).
-  Local Notation    BoundsException := (pcAluOut`"BoundsException" : Expr ty Bool ).
+  Local Notation           pcAluOut := (##aluIn`"pcAluOut" : Expr ty PcAluOut ) (only parsing).
+  Local Notation              pcVal := (pcAluOut`"pcVal" : Expr ty Addr ) (only parsing).
+  Local Notation    BoundsException := (pcAluOut`"BoundsException" : Expr ty Bool ) (only parsing).
   
-  Local Notation               regs := (##aluIn`"regs" : Expr ty (Array NumRegs _) ).
-  Local Notation              waits := (##aluIn`"waits" : Expr ty (Array NumRegs _) ).
+  Local Notation               regs := (##aluIn`"regs" : Expr ty (Array NumRegs _) ) (only parsing).
+  Local Notation              waits := (##aluIn`"waits" : Expr ty (Array NumRegs _) ) (only parsing).
 
-  Local Notation               csrs := (##aluIn`"csrs" : Expr ty Csrs ).
-  Local Notation             mcycle := (csrs`"mcycle" : Expr ty (Bit DXlen) ).
-  Local Notation              mtime := (csrs`"mtime" : Expr ty (Bit DXlen) ).
-  Local Notation           minstret := (csrs`"minstret" : Expr ty (Bit DXlen) ).
-  Local Notation              mshwm := (csrs`"mshwm" : Expr ty (Bit _) ).
-  Local Notation             mshwmb := (csrs`"mshwmb" : Expr ty (Bit _) ).
+  Local Notation               csrs := (##aluIn`"csrs" : Expr ty Csrs ) (only parsing).
+  Local Notation             mcycle := (csrs`"mcycle" : Expr ty (Bit DXlen) ) (only parsing).
+  Local Notation              mtime := (csrs`"mtime" : Expr ty (Bit DXlen) ) (only parsing).
+  Local Notation           minstret := (csrs`"minstret" : Expr ty (Bit DXlen) ) (only parsing).
+  Local Notation              mshwm := (csrs`"mshwm" : Expr ty (Bit _) ) (only parsing).
+  Local Notation             mshwmb := (csrs`"mshwmb" : Expr ty (Bit _) ) (only parsing).
 
-  Local Notation                 ie := (csrs`"ie" : Expr ty Bool ).
-  Local Notation          interrupt := (csrs`"interrupt" : Expr ty Bool ).
-  Local Notation             mcause := (csrs`"mcause" : Expr ty (Bit McauseSz) ).
-  Local Notation              mtval := (csrs`"mtval" : Expr ty Addr ).
+  Local Notation                 ie := (csrs`"ie" : Expr ty Bool ) (only parsing).
+  Local Notation          interrupt := (csrs`"interrupt" : Expr ty Bool ) (only parsing).
+  Local Notation             mcause := (csrs`"mcause" : Expr ty (Bit McauseSz) ) (only parsing).
+  Local Notation              mtval := (csrs`"mtval" : Expr ty Addr ) (only parsing).
 
-  Local Notation               scrs := (##aluIn`"scrs" : Expr ty Scrs ).
-  Local Notation               mtcc := (scrs`"mtcc" : Expr ty FullECapWithTag ).
-  Local Notation               mtdc := (scrs`"mtdc" : Expr ty FullECapWithTag ).
-  Local Notation           mscratch := (scrs`"mscratchc" : Expr ty FullECapWithTag ).
-  Local Notation              mepcc := (scrs`"mepcc" : Expr ty FullECapWithTag ).
+  Local Notation               scrs := (##aluIn`"scrs" : Expr ty Scrs ) (only parsing).
+  Local Notation               mtcc := (scrs`"mtcc" : Expr ty FullECapWithTag ) (only parsing).
+  Local Notation               mtdc := (scrs`"mtdc" : Expr ty FullECapWithTag ) (only parsing).
+  Local Notation           mscratch := (scrs`"mscratchc" : Expr ty FullECapWithTag ) (only parsing).
+  Local Notation              mepcc := (scrs`"mepcc" : Expr ty FullECapWithTag ) (only parsing).
 
-  Local Notation         interrupts := (##aluIn`"interrupts" : Expr ty Interrupts ).
-  Local Notation                mei := (interrupts`"mei" : Expr ty Bool ).
-  Local Notation                mti := (interrupts`"mti" : Expr ty Bool ).
+  Local Notation         interrupts := (##aluIn`"interrupts" : Expr ty Interrupts ) (only parsing).
+  Local Notation                mei := (interrupts`"mei" : Expr ty Bool ) (only parsing).
+  Local Notation                mti := (interrupts`"mti" : Expr ty Bool ) (only parsing).
 
-  Local Notation          decodeOut := (##aluIn`"decodeOut" : Expr ty DecodeOut ).
-  Local Notation        rs1IdxFixed := (decodeOut`"rs1Idx" : Expr ty (Bit RegFixedIdSz) ).
-  Local Notation        rs2IdxFixed := (decodeOut`"rs2Idx" : Expr ty (Bit RegFixedIdSz) ).
-  Local Notation         rdIdxFixed := (decodeOut`"rdIdx" : Expr ty (Bit RegFixedIdSz) ).
-  Local Notation             decImm := (decodeOut`"decImm" : Expr ty (Bit DecImmSz) ).
-  Local Notation              memSz := (decodeOut`"memSz" : Expr ty (Bit MemSzSz) ).
+  Local Notation          decodeOut := (##aluIn`"decodeOut" : Expr ty DecodeOut ) (only parsing).
+  Local Notation        rs1IdxFixed := (decodeOut`"rs1Idx" : Expr ty (Bit RegFixedIdSz) ) (only parsing).
+  Local Notation        rs2IdxFixed := (decodeOut`"rs2Idx" : Expr ty (Bit RegFixedIdSz) ) (only parsing).
+  Local Notation         rdIdxFixed := (decodeOut`"rdIdx" : Expr ty (Bit RegFixedIdSz) ) (only parsing).
+  Local Notation             decImm := (decodeOut`"decImm" : Expr ty (Bit DecImmSz) ) (only parsing).
+  Local Notation              memSz := (decodeOut`"memSz" : Expr ty (Bit MemSzSz) ) (only parsing).
 
-  Local Notation         Compressed := (decodeOut`"Compressed" : Expr ty Bool ).
-  Local Notation        ImmExtRight := (decodeOut`"ImmExtRight" : Expr ty Bool ).
-  Local Notation         ImmForData := (decodeOut`"ImmForData" : Expr ty Bool ).
-  Local Notation         ImmForAddr := (decodeOut`"ImmForAddr" : Expr ty Bool ).
+  Local Notation         Compressed := (decodeOut`"Compressed" : Expr ty Bool ) (only parsing).
+  Local Notation        ImmExtRight := (decodeOut`"ImmExtRight" : Expr ty Bool ) (only parsing).
+  Local Notation         ImmForData := (decodeOut`"ImmForData" : Expr ty Bool ) (only parsing).
+  Local Notation         ImmForAddr := (decodeOut`"ImmForAddr" : Expr ty Bool ) (only parsing).
 
-  Local Notation           ReadReg1 := (decodeOut`"ReadReg1" : Expr ty Bool ).
-  Local Notation           ReadReg2 := (decodeOut`"ReadReg2" : Expr ty Bool ).
-  Local Notation           WriteReg := (decodeOut`"WriteReg" : Expr ty Bool ).
+  Local Notation           ReadReg1 := (decodeOut`"ReadReg1" : Expr ty Bool ) (only parsing).
+  Local Notation           ReadReg2 := (decodeOut`"ReadReg2" : Expr ty Bool ) (only parsing).
+  Local Notation           WriteReg := (decodeOut`"WriteReg" : Expr ty Bool ) (only parsing).
 
-  Local Notation         MultiCycle := (decodeOut`"MultiCycle" : Expr ty Bool ).
+  Local Notation         MultiCycle := (decodeOut`"MultiCycle" : Expr ty Bool ) (only parsing).
   
-  Local Notation             Src1Pc := (decodeOut`"Src1Pc" : Expr ty Bool ).
-  Local Notation            InvSrc2 := (decodeOut`"InvSrc2" : Expr ty Bool ).
-  Local Notation           Src2Zero := (decodeOut`"Src2Zero" : Expr ty Bool ).
-  Local Notation     ZeroExtendSrc1 := (decodeOut`"ZeroExtendSrc1" : Expr ty Bool ).
-  Local Notation             Branch := (decodeOut`"Branch" : Expr ty Bool ).
-  Local Notation           BranchLt := (decodeOut`"BranchLt" : Expr ty Bool ).
-  Local Notation          BranchNeg := (decodeOut`"BranchNeg" : Expr ty Bool ).
-  Local Notation              SltOp := (decodeOut`"Slt" : Expr ty Bool ).
-  Local Notation              AddOp := (decodeOut`"Add" : Expr ty Bool ).
-  Local Notation              XorOp := (decodeOut`"Xor" : Expr ty Bool ).
-  Local Notation               OrOp := (decodeOut`"Or" : Expr ty Bool ).
-  Local Notation              AndOp := (decodeOut`"And" : Expr ty Bool ).
-  Local Notation                 Sl := (decodeOut`"Sl" : Expr ty Bool ).
-  Local Notation                 Sr := (decodeOut`"Sr" : Expr ty Bool ).
-  Local Notation              Store := (decodeOut`"Store" : Expr ty Bool ).
-  Local Notation               Load := (decodeOut`"Load" : Expr ty Bool ).
-  Local Notation       LoadUnsigned := (decodeOut`"LoadUnsigned" : Expr ty Bool ).
-  Local Notation          SetBounds := (decodeOut`"SetBounds" : Expr ty Bool ).
-  Local Notation     SetBoundsExact := (decodeOut`"SetBoundsExact" : Expr ty Bool ).
-  Local Notation       BoundsSubset := (decodeOut`"BoundsSubset" : Expr ty Bool ).
-  Local Notation    BoundsFixedBase := (decodeOut`"BoundsFixedBase" : Expr ty Bool ).
+  Local Notation             Src1Pc := (decodeOut`"Src1Pc" : Expr ty Bool ) (only parsing).
+  Local Notation            InvSrc2 := (decodeOut`"InvSrc2" : Expr ty Bool ) (only parsing).
+  Local Notation           Src2Zero := (decodeOut`"Src2Zero" : Expr ty Bool ) (only parsing).
+  Local Notation     ZeroExtendSrc1 := (decodeOut`"ZeroExtendSrc1" : Expr ty Bool ) (only parsing).
+  Local Notation             Branch := (decodeOut`"Branch" : Expr ty Bool ) (only parsing).
+  Local Notation           BranchLt := (decodeOut`"BranchLt" : Expr ty Bool ) (only parsing).
+  Local Notation          BranchNeg := (decodeOut`"BranchNeg" : Expr ty Bool ) (only parsing).
+  Local Notation              SltOp := (decodeOut`"Slt" : Expr ty Bool ) (only parsing).
+  Local Notation              AddOp := (decodeOut`"Add" : Expr ty Bool ) (only parsing).
+  Local Notation              XorOp := (decodeOut`"Xor" : Expr ty Bool ) (only parsing).
+  Local Notation               OrOp := (decodeOut`"Or" : Expr ty Bool ) (only parsing).
+  Local Notation              AndOp := (decodeOut`"And" : Expr ty Bool ) (only parsing).
+  Local Notation                 Sl := (decodeOut`"Sl" : Expr ty Bool ) (only parsing).
+  Local Notation                 Sr := (decodeOut`"Sr" : Expr ty Bool ) (only parsing).
+  Local Notation              Store := (decodeOut`"Store" : Expr ty Bool ) (only parsing).
+  Local Notation               Load := (decodeOut`"Load" : Expr ty Bool ) (only parsing).
+  Local Notation       LoadUnsigned := (decodeOut`"LoadUnsigned" : Expr ty Bool ) (only parsing).
+  Local Notation          SetBounds := (decodeOut`"SetBounds" : Expr ty Bool ) (only parsing).
+  Local Notation     SetBoundsExact := (decodeOut`"SetBoundsExact" : Expr ty Bool ) (only parsing).
+  Local Notation    BoundsRoundDown := (decodeOut`"BoundsRoundDown" : Expr ty Bool ) (only parsing).
 
-  Local Notation        CChangeAddr := (decodeOut`"CChangeAddr" : Expr ty Bool ).
-  Local Notation             AuiPcc := (decodeOut`"AuiPcc" : Expr ty Bool ).
-  Local Notation           CGetBase := (decodeOut`"CGetBase" : Expr ty Bool ).
-  Local Notation            CGetTop := (decodeOut`"CGetTop" : Expr ty Bool ).
-  Local Notation            CGetLen := (decodeOut`"CGetLen" : Expr ty Bool ).
-  Local Notation           CGetPerm := (decodeOut`"CGetPerm" : Expr ty Bool ).
-  Local Notation           CGetType := (decodeOut`"CGetType" : Expr ty Bool ).
-  Local Notation            CGetTag := (decodeOut`"CGetTag" : Expr ty Bool ).
-  Local Notation           CGetHigh := (decodeOut`"CGetHigh" : Expr ty Bool ).
-  Local Notation               Cram := (decodeOut`"Cram" : Expr ty Bool ).
-  Local Notation               Crrl := (decodeOut`"Crrl" : Expr ty Bool ).
-  Local Notation          CSetEqual := (decodeOut`"CSetEqual" : Expr ty Bool ).
-  Local Notation        CTestSubset := (decodeOut`"CTestSubset" : Expr ty Bool ).
-  Local Notation           CAndPerm := (decodeOut`"CAndPerm" : Expr ty Bool ).
-  Local Notation          CClearTag := (decodeOut`"CClearTag" : Expr ty Bool ).
-  Local Notation           CSetHigh := (decodeOut`"CSetHigh" : Expr ty Bool ).
-  Local Notation              CMove := (decodeOut`"CMove" : Expr ty Bool ).
-  Local Notation              CSeal := (decodeOut`"CSeal" : Expr ty Bool ).
-  Local Notation            CUnseal := (decodeOut`"CUnseal" : Expr ty Bool ).
+  Local Notation        CChangeAddr := (decodeOut`"CChangeAddr" : Expr ty Bool ) (only parsing).
+  Local Notation             AuiPcc := (decodeOut`"AuiPcc" : Expr ty Bool ) (only parsing).
+  Local Notation           CGetBase := (decodeOut`"CGetBase" : Expr ty Bool ) (only parsing).
+  Local Notation            CGetTop := (decodeOut`"CGetTop" : Expr ty Bool ) (only parsing).
+  Local Notation            CGetLen := (decodeOut`"CGetLen" : Expr ty Bool ) (only parsing).
+  Local Notation           CGetPerm := (decodeOut`"CGetPerm" : Expr ty Bool ) (only parsing).
+  Local Notation           CGetType := (decodeOut`"CGetType" : Expr ty Bool ) (only parsing).
+  Local Notation            CGetTag := (decodeOut`"CGetTag" : Expr ty Bool ) (only parsing).
+  Local Notation           CGetHigh := (decodeOut`"CGetHigh" : Expr ty Bool ) (only parsing).
+  Local Notation               Cram := (decodeOut`"Cram" : Expr ty Bool ) (only parsing).
+  Local Notation               Crrl := (decodeOut`"Crrl" : Expr ty Bool ) (only parsing).
+  Local Notation          CSetEqual := (decodeOut`"CSetEqual" : Expr ty Bool ) (only parsing).
+  Local Notation        CTestSubset := (decodeOut`"CTestSubset" : Expr ty Bool ) (only parsing).
+  Local Notation           CAndPerm := (decodeOut`"CAndPerm" : Expr ty Bool ) (only parsing).
+  Local Notation          CClearTag := (decodeOut`"CClearTag" : Expr ty Bool ) (only parsing).
+  Local Notation           CSetHigh := (decodeOut`"CSetHigh" : Expr ty Bool ) (only parsing).
+  Local Notation              CMove := (decodeOut`"CMove" : Expr ty Bool ) (only parsing).
+  Local Notation              CSeal := (decodeOut`"CSeal" : Expr ty Bool ) (only parsing).
+  Local Notation            CUnseal := (decodeOut`"CUnseal" : Expr ty Bool ) (only parsing).
   
-  Local Notation               CJal := (decodeOut`"CJal" : Expr ty Bool ).
-  Local Notation              CJalr := (decodeOut`"CJalr" : Expr ty Bool ).
-  Local Notation             AuiAll := (decodeOut`"AuiAll" : Expr ty Bool ).
-  Local Notation                Lui := (decodeOut`"Lui" : Expr ty Bool ).
+  Local Notation               CJal := (decodeOut`"CJal" : Expr ty Bool ) (only parsing).
+  Local Notation              CJalr := (decodeOut`"CJalr" : Expr ty Bool ) (only parsing).
+  Local Notation             AuiAll := (decodeOut`"AuiAll" : Expr ty Bool ) (only parsing).
+  Local Notation                Lui := (decodeOut`"Lui" : Expr ty Bool ) (only parsing).
 
-  Local Notation         CSpecialRw := (decodeOut`"CSpecialRw" : Expr ty Bool ).
-  Local Notation               MRet := (decodeOut`"MRet" : Expr ty Bool ).
-  Local Notation              ECall := (decodeOut`"ECall" : Expr ty Bool ).
-  Local Notation             EBreak := (decodeOut`"EBreak" : Expr ty Bool ).
-  Local Notation             FenceI := (decodeOut`"FenceI" : Expr ty Bool ).
-  Local Notation              Fence := (decodeOut`"Fence" : Expr ty Bool ).
-  Local Notation         NotIllegal := (decodeOut`"NotIllegal" : Expr ty Bool ).
+  Local Notation         CSpecialRw := (decodeOut`"CSpecialRw" : Expr ty Bool ) (only parsing).
+  Local Notation               MRet := (decodeOut`"MRet" : Expr ty Bool ) (only parsing).
+  Local Notation              ECall := (decodeOut`"ECall" : Expr ty Bool ) (only parsing).
+  Local Notation             EBreak := (decodeOut`"EBreak" : Expr ty Bool ) (only parsing).
+  Local Notation             FenceI := (decodeOut`"FenceI" : Expr ty Bool ) (only parsing).
+  Local Notation              Fence := (decodeOut`"Fence" : Expr ty Bool ) (only parsing).
+  Local Notation         NotIllegal := (decodeOut`"NotIllegal" : Expr ty Bool ) (only parsing).
 
-  Local Notation              CsrRw := (decodeOut`"CsrRw" : Expr ty Bool ).
-  Local Notation             CsrSet := (decodeOut`"CsrSet" : Expr ty Bool ).
-  Local Notation           CsrClear := (decodeOut`"CsrClear" : Expr ty Bool ).
-  Local Notation             CsrImm := (decodeOut`"CsrImm" : Expr ty Bool ).
+  Local Notation              CsrRw := (decodeOut`"CsrRw" : Expr ty Bool ) (only parsing).
+  Local Notation             CsrSet := (decodeOut`"CsrSet" : Expr ty Bool ) (only parsing).
+  Local Notation           CsrClear := (decodeOut`"CsrClear" : Expr ty Bool ) (only parsing).
+  Local Notation             CsrImm := (decodeOut`"CsrImm" : Expr ty Bool ) (only parsing).
 
   Local Notation GetCsrIdx x := (Const _ (Bit CsrIdSz) (Zmod.of_Z _ x)).
 
@@ -1520,7 +1515,7 @@ Section Alu.
       LetE cram_crrl <- Or [Cram; Crrl];
       LetE boundsBase <- ZeroExtend 1 (ITE #cram_crrl $0 #val1);
       LetE boundsLength <- ZeroExtend 1 (ITE #cram_crrl #val1 #val2);
-      LETE newBounds <- calculateBounds #boundsBase #boundsLength BoundsSubset BoundsFixedBase;
+      LETE newBounds <- calculateBounds #boundsBase #boundsLength BoundsRoundDown;
       LetE newBoundsTop <- Add [#newBounds`"base"; ##newBounds`"length"];
       LetE cSetEqual <- And [Eq #tag1 #tag2; Eq #cap1 #cap2; Eq #val1 #val2];
       LetE zeroExtendBoolRes <- ZeroExtendTo Xlen (ToBit (Or [ITE0 SltOp #adderCarryBool;
